@@ -37,6 +37,7 @@ def map_edge_flow_residual(arg):
     sp_dist = sp.distance(destin_ID) ### agent believed travel time with imperfect information
     if sp_dist > 10e7:
         # print(agent_id, sp_dist)
+        sp.clear()
         return {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'route': pd.DataFrame([], columns=['start_sp', 'end_sp']), 'arr': 'n'} ### empty path; not reach destination; travel time 0
     else:
         sp_route = sp.route(destin_ID) ### agent route planned with imperfect information
@@ -44,7 +45,7 @@ def map_edge_flow_residual(arg):
         sp_route_df = pd.DataFrame([edge for edge in sp_route], columns=['start_sp', 'end_sp'])
         #sp_route_df.insert(0, 'seq_id', range(sp_route_df.shape[0]))
         sub_edges_df = edges_df[(edges_df['start_sp'].isin(sp_route_df['start_sp'])) & (edges_df['end_sp'].isin(sp_route_df['end_sp']))]
-        # sp.clear()
+        sp.clear()
 
         #sp_route_df = pd.merge(sp_route_df, sub_edges_df[['previous_t']], how='left')
         sp_route_df = sp_route_df.merge(sub_edges_df[['start_sp', 'end_sp', 'previous_t', 'true_vol']], on=['start_sp', 'end_sp'], how='left')
@@ -92,7 +93,7 @@ def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
         return pd.DataFrame([], columns=['start_sp', 'end_sp', 'ss_vol']), [], [], 0
 
     ### Build a pool
-    process_count = 7
+    process_count = 50
     pool = Pool(processes=process_count, maxtasksperchild=1000)
 
     ### Find shortest pathes
@@ -250,7 +251,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
         edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
-        for hour in range(3,4):
+        for hour in range(3,30):
 
             t_hour_0 = time.time()
 
@@ -317,7 +318,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
                     t_substep_1 = time.time()
                     print('DY{}_HR{} SS {}: {} sec, {} OD pairs'.format(day, hour, ss_id, t_substep_1-t_substep_0, OD_ss.shape[0], ))
 
-                # output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
+                output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
 
                 ### Update carry over flow
                 sta_stats.append([
@@ -356,7 +357,7 @@ def main(random_seed=0, scen_id='base', damage_df=None, quarter_counts=4, projec
 
     ### origanize results
     sta_stats_df = pd.DataFrame(sta_stats, columns=['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol'])
-    # sta_stats_df.to_csv(absolute_path+'/simulation_outputs/stats/stats_scen{}_{}_rec{}_r{}_od{}.csv'.format(scen_id, road_type, recovery_period, random_seed, total_od_counts), index=False)
+    sta_stats_df.to_csv(absolute_path+'/simulation_outputs/stats/stats_scen{}_{}_rec{}_r{}_od{}.csv'.format(scen_id, road_type, recovery_period, random_seed, total_od_counts), index=False)
     print('total travel hours', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_min'])/60)
     print('total travel km', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_km']))
 
