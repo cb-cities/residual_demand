@@ -170,11 +170,11 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
     if chunk:
         od_list = []
         for chunk_num in range(3):
-            sub_od = pd.read_csv(absolute_path+'{}/od_residual_demand_{}.csv'.format(project_folder, chunk_num))
+            sub_od = pd.read_csv(absolute_path+'{}/demand_inputs/od_residual_demand_{}.csv'.format(project_folder, chunk_num))
             od_list.append(sub_od)
         OD = pd.concat(od_list, ignore_index=True)
     else:
-        OD = pd.read_csv(absolute_path+'{}/od_residual_demand.csv'.format(project_folder))
+        OD = pd.read_csv(absolute_path+'{}/demand_inputs/od_residual_demand.csv'.format(project_folder))
     OD['origin_sp'] = OD['node_id_igraph_O'] + 1 ### the node id in module sp is 1 higher than igraph id
     OD['destin_sp'] = OD['node_id_igraph_D'] + 1
     if 'agent_id' not in OD.columns:
@@ -192,7 +192,7 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
 def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_id=None, project_folder=None):
 
     ### Aggregate and calculate link-level variables after all increments
-    edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(absolute_path+'{}/outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
+    edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
 
 def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project_folder=None, od_chunk=False):
 
@@ -205,8 +205,8 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
     global edges_df ### link weights
 
     ### Read in the edge attribute for volume delay calculation later
-    edges_df0 = pd.read_csv(absolute_path+'{}/edges_residual_demand.csv'.format(project_folder))
-    nodes_df = pd.read_csv(absolute_path+'{}/nodes_residual_demand.csv'.format(project_folder))
+    edges_df0 = pd.read_csv(absolute_path+'{}/network_inputs/edges_residual_demand.csv'.format(project_folder))
+    nodes_df = pd.read_csv(absolute_path+'{}/network_inputs/nodes_residual_demand.csv'.format(project_folder))
     
     ### damage
     if damage_df is None:
@@ -356,7 +356,7 @@ def main(random_seed=0, scen_id='base', damage_df=None, quarter_counts=4, projec
 
     ### origanize results
     sta_stats_df = pd.DataFrame(sta_stats, columns=['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol'])
-    # sta_stats_df.to_csv(absolute_path+'/output/stats/stats_scen{}_{}_rec{}_r{}_od{}.csv'.format(scen_id, road_type, recovery_period, random_seed, total_od_counts), index=False)
+    # sta_stats_df.to_csv(absolute_path+'/simulation_outputs/stats/stats_scen{}_{}_rec{}_r{}_od{}.csv'.format(scen_id, road_type, recovery_period, random_seed, total_od_counts), index=False)
     print('total travel hours', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_min'])/60)
     print('total travel km', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_km']))
 
