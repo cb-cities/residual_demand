@@ -44,6 +44,7 @@ def map_edge_flow_residual(arg):
         sp_route_df = pd.DataFrame([edge for edge in sp_route], columns=['start_sp', 'end_sp'])
         #sp_route_df.insert(0, 'seq_id', range(sp_route_df.shape[0]))
         sub_edges_df = edges_df[(edges_df['start_sp'].isin(sp_route_df['start_sp'])) & (edges_df['end_sp'].isin(sp_route_df['end_sp']))]
+        # sp.clear()
 
         #sp_route_df = pd.merge(sp_route_df, sub_edges_df[['previous_t']], how='left')
         sp_route_df = sp_route_df.merge(sub_edges_df[['start_sp', 'end_sp', 'previous_t', 'true_vol']], on=['start_sp', 'end_sp'], how='left')
@@ -181,7 +182,7 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
     if 'hour' not in OD.columns:
         OD['hour'] = 0
     OD = OD[['agent_id', 'origin_sp', 'destin_sp', 'hour']]
-    OD = OD.iloc[0:1000000]
+    # OD = OD.iloc[0:1000000]
 
     t_OD_1 = time.time()
     print('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
@@ -316,7 +317,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
                     t_substep_1 = time.time()
                     print('DY{}_HR{} SS {}: {} sec, {} OD pairs'.format(day, hour, ss_id, t_substep_1-t_substep_0, OD_ss.shape[0], ))
 
-                output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
+                # output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
 
                 ### Update carry over flow
                 sta_stats.append([
