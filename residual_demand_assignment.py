@@ -1,28 +1,24 @@
 ### Based on https://mikecvet.wordpress.com/2010/07/02/parallel-mapreduce-in-python/
-import json
-import sys
-import numpy as np
-import scipy.sparse as ssparse
-import scipy.io as sio
-import multiprocessing
-from multiprocessing import Pool 
-import time 
 import os
-import datetime
-import warnings
+import gc 
+import sys
+import time 
+import logging
+import numpy as np
 import pandas as pd 
 from ctypes import *
-import gc 
+import scipy.io as sio
 from heapq import nlargest
-import shapely.wkt
+import scipy.sparse as ssparse
+from multiprocessing import Pool 
+### user library
+sys.path.insert(0, home_dir+'/..')
+from sp import interface
 
-pd.set_option('display.max_columns', 10)
-sys.setrecursionlimit(2000)
-
-absolute_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, absolute_path+'/../')
-sys.path.insert(0, '/home/bingyu/')
-from sp import interface 
+### dir
+home_dir = os.environ['HOME']+'/residual_demand'
+work_dir = os.environ['WORK']+'/residual_demand'
+scratch_dir = os.environ['SCRATCH']+'/residual_demand'
 
 def map_edge_flow_residual(arg):
     ### Find shortest path for each unique origin --> one destination
@@ -72,7 +68,6 @@ def reduce_edge_flow_pd(agent_info_routes_found, day, hour, quarter, ss_id):
     df_L = pd.concat([r['route'] for r in agent_info_routes_found])
     df_L_flow = df_L.groupby(['start_sp', 'end_sp']).size().reset_index().rename(columns={0: 'ss_vol'}) # link_flow counts the number of vehicles, link_probe counts the number of probe vehicles
     t1 = time.time()
-    # print('DY{}_HR{}_QT{} SS {}: reduce find {} edges, {} sec w/ pd.groupby, max substep volume {}'.format(day, hour, quarter, ss_id, df_L_flow.shape[0], t1-t0, np.max(df_L_flow['ss_vol'])))
     
     return df_L_flow
 
@@ -86,8 +81,8 @@ def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
         return pd.DataFrame([], columns=['start_sp', 'end_sp', 'ss_vol']), [], [], 0
 
     ### Build a pool
-    process_count = 50
-    pool = Pool(processes=process_count, maxtasksperchild=1000)
+    process_count = 40
+    pool = Pool(processes=process_count)
 
     ### Find shortest pathes
     res = pool.imap_unordered(map_edge_flow_residual, [(i, quarter_counts) for i in range(unique_origin)])
@@ -104,16 +99,10 @@ def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
     agent_info_routes_notfound = [a for a in agent_info_routes if a['arr']=='n']
 
     edge_volume = reduce_edge_flow_pd(agent_info_routes_found, day, hour, quarter, ss_id)
-    # try:
-    #     edge_volume = reduce_edge_flow_pd(agent_info_routes, day, hour, quarter, ss_id)
-    # except TypeError:
-    #     return pd.DataFrame([], columns=['start_sp', 'end_sp', 'ss_vol']), [], [], 0
     
     ss_residual_OD_list = [(r['agent_id'], r['h_sp'], r['d_sp']) for r in agent_info_routes_found if r['h_sp']!=r['d_sp']]
     #ss_travel_time_list = [(r['agent_id'], day, hour, quarter, ss_id, r['travel_time']) for r in agent_info_routes]
     ss_travel_time_list = []
-    # print('ss {}, total od {}, found {}, not found {}'.format(ss_id, unique_origin, len(agent_info_routes_found), len(agent_info_routes_notfound)))
-    # print('DY{}_HR{}_QT{} SS {}: {} O --> {} D found, dijkstra pool {} sec on {} processes'.format(day, hour, quarter, ss_id, unique_origin, len(agent_info_routes_found), t_odsp_1 - t_odsp_0, process_count))
 
     return edge_volume, ss_residual_OD_list, ss_travel_time_list, len(agent_info_routes_notfound)
 
@@ -150,77 +139,75 @@ def update_graph(edge_volume, edges_df, day, hour, quarter, ss_id, quarter_deman
 
     return edges_df
 
-def read_OD(nodes_df=None, project_folder=None, chunk=False):
+def read_OD(nodes_df=None, demand_files=None):
     ### Read the OD table of this time step
 
     t_OD_0 = time.time()
+    logger = logging.getLogger("bk_evac")
+
+    ### Read OD from a list of files
+    od_list = []
+    for demand_file in demand_files:
+        sub_od = pd.read_csv(work_dir+'{}/demand_inputs/od_residual_demand_{}.csv'.format(project_folder, chunk_num))
+        od_list.append(sub_od)
+    OD = pd.concat(od_list, ignore_index=True)
+
     ### Change OD list from using osmid to sequential id. It is easier to find the shortest path based on sequential index.
-    if chunk:
-        od_list = []
-        for chunk_num in range(3):
-            sub_od = pd.read_csv(absolute_path+'{}/demand_inputs/od_residual_demand_{}.csv'.format(project_folder, chunk_num))
-            od_list.append(sub_od)
-        OD = pd.concat(od_list, ignore_index=True)
-    else:
-        OD = pd.read_csv(absolute_path+'{}/demand_inputs/OD_scag_5pct.csv'.format(project_folder))
-    OD = pd.merge(OD, nodes_df[['node_osmid', 'node_id_igraph']], how='left', left_on='O', right_on='node_osmid')
-    OD = pd.merge(OD, nodes_df[['node_osmid', 'node_id_igraph']], how='left', left_on='D', right_on='node_osmid', suffixes=['_O', '_D'])
+    if 'node_id_igraph_O' not in OD.columns:
+        OD = pd.merge(OD, nodes_df[['node_osmid', 'node_id_igraph']], how='left', left_on='O', right_on='node_osmid')
+        OD = pd.merge(OD, nodes_df[['node_osmid', 'node_id_igraph']], how='left', left_on='D', right_on='node_osmid', suffixes=['_O', '_D'])
+    if 'agent_id' not in OD.columns: OD['agent_id'] = np.arange(OD.shape[0])
+    if 'hour' not in OD.columns: OD['hour'] = 0
     OD['origin_sp'] = OD['node_id_igraph_O'] + 1 ### the node id in module sp is 1 higher than igraph id
     OD['destin_sp'] = OD['node_id_igraph_D'] + 1
-    if 'agent_id' not in OD.columns:
-        OD['agent_id'] = np.arange(OD.shape[0])
-    if 'hour' not in OD.columns:
-        OD['hour'] = 0
     OD = OD[['agent_id', 'origin_sp', 'destin_sp', 'hour']]
-    OD = OD.iloc[0:100000]
+    OD = OD.iloc[0:1000]
+    logging.info('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
 
     t_OD_1 = time.time()
-    print('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
     return OD
 
-def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_id=None, project_folder=None):
+def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_nm=None, simulation_outputs=None):
 
     ### Aggregate and calculate link-level variables after all increments
-    # edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
-    edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg', 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
+    edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg', 2}).to_csv(simulation_outputs+'/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(scen_nm, random_seed, day, hour, quarter), index=False)
 
-def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project_folder=None, od_chunk=False):
+def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=None, 
+        network_file_nodes=None, network_file_edges=None, demand_files=None, simulation_outputs=None):
 
     t_main_0 = time.time()
-    ### Fix random seed
-    np.random.seed(random_seed)
+    logger = logging.getLogger("bk_evac")
+
     ### Define global variables to be shared with subprocesses
     global g ### weighted graph
     global OD_ss ### substep demand
     global edges_df ### link weights
 
     ### Read in the edge attribute for volume delay calculation later
-    edges_df0 = pd.read_csv(absolute_path+'{}/network_inputs/osm_edges_scag.csv'.format(project_folder))
-    nodes_df = pd.read_csv(absolute_path+'{}/network_inputs/osm_nodes_scag.csv'.format(project_folder))
-    
+    edges_df0 = pd.read_csv(work_dir+network_file_edges)
+    nodes_df = pd.read_csv(work_dir+network_file_nodes)
     ### damage
-    if damage_df is None:
-        pass
-    else:
+    if damage_file_edges is not None:
+        damange_df = pd.read_csv(work_dir+damage_file_edges)
         edges_df0.loc[edges_df0['edge_id_igraph'].isin(damage_df['edge_id_igraph']), 'fft'] = 10e7
 
     node_count = max(len(np.unique(edges_df0['start_igraph'])), len(np.unique(edges_df0['end_igraph'])))
     g_coo = ssparse.coo_matrix((edges_df0['fft']*1.2, (edges_df0['start_igraph'], edges_df0['end_igraph'])), shape=(node_count, node_count))
     edges_df0 = edges_df0[['edge_id_igraph', 'start_sp', 'end_sp', 'length', 'capacity', 'fft', 'type']]
-    sio.mmwrite(absolute_path+'{}/simulation_outputs/network_sparse_scen{}_r{}.mtx'.format(project_folder, scen_id, random_seed), g_coo)
+    sio.mmwrite(scratch_dir+simulation_outputs+'/network_sparse_scen{}_r{}.mtx'.format(scen_nm, random_seed), g_coo)
 
-    all_OD = read_OD(nodes_df = nodes_df, project_folder=project_folder, chunk=od_chunk)
+    all_OD = read_OD(nodes_df = nodes_df, demand_files=demand_files)
 
-    ### Define quarter and substep parameters
-    quarter_ps = [1/quarter_counts for i in range(quarter_counts)] ### probability of being in each division of hour
+    ### Quarters and substeps
+    ### probability of being in each division of hour
+    quarter_ps = [1/quarter_counts for i in range(quarter_counts)]
     quarter_ids = [i for i in range(quarter_counts)]
-    
+    ### probability of being in each substep
     substep_counts = 15
-    substep_ps = [1/substep_counts for i in range(substep_counts)] ### probability of being in each substep
+    substep_ps = [1/substep_counts for i in range(substep_counts)] 
     substep_ids = [i for i in range(substep_counts)]
-    print('{} quarters per hour, {} substeps'.format(quarter_counts, substep_counts))
+    logging.info('{} quarters per hour, {} substeps'.format(quarter_counts, substep_counts))
 
-    sta_stats = []
     residual_OD_list = []
     travel_time_list = []
 
@@ -228,7 +215,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
     for day in ['na']:
 
         ### Read in the initial network (free flow travel time
-        g = interface.readgraph(bytes(absolute_path+'{}/simulation_outputs/network_sparse_scen{}_r{}.mtx'.format(project_folder, scen_id, random_seed), encoding='utf-8'))
+        g = interface.readgraph(bytes(scratch_dir+simulation_outputs+'/network_sparse_scen{}_r{}.mtx'.format(scen_nm, random_seed), encoding='utf-8'))
         ### test damage
         # test_sp = g.dijkstra(31269, 131637)
         # print(test_sp.distance(131637), [edge for edge in test_sp.route(131637)])
@@ -240,7 +227,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
         edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
-        for hour in range(0,2):
+        for hour in range(3,5):
 
             t_hour_0 = time.time()
 
@@ -270,7 +257,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
                 residual_demand = OD_residual.shape[0] ### how many among the OD pairs to be assigned in this quarter are actually residual from previous quarters
                 assigned_demand = 0
 
-                print('DY {}, HR {}, QT {}, quarter_demand {}'.format(day, hour, quarter, quarter_demand))
+                logging.info('DY {}, HR {}, QT {}, quarter_demand {}'.format(day, hour, quarter, quarter_demand))
 
                 if quarter_demand == 0:
                     continue
@@ -305,54 +292,70 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
                         edges_df = update_graph(edge_volume, edges_df, day, hour, quarter, ss_id, quarter_demand, assigned_demand, quarter_counts)
 
                     t_substep_1 = time.time()
-                    print('DY{}_HR{} SS {}: {} sec, {} OD pairs'.format(day, hour, ss_id, t_substep_1-t_substep_0, OD_ss.shape[0], ))
+                    logging.info('DY{}_HR{} SS {}: {} sec, {} OD pairs'.format(day, hour, ss_id, t_substep_1-t_substep_0, OD_ss.shape[0], ))
 
-                output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
+                output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_nm=scen_nm, simulation_outputs=simulation_outputs)
 
                 ### stats
-                sta_stats.append([
-                    random_seed, day, hour, quarter, quarter_demand, residual_demand, len(residual_OD_list),
-                    np.sum(edges_df['t_avg']*edges_df['true_vol']/(quarter_demand*60)),
-                    np.sum(edges_df['length']*edges_df['true_vol']/(quarter_demand*1000)),
-                    np.mean(edges_df.nlargest(10, 'true_vol')['true_vol'])
-                    ])
+                ### step outputs
+                with open(scratch_dir+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_nm),'w+') as stats_outfile:
+                    stats_outfile.write(",".join([random_seed, day, hour, quarter, 
+                        quarter_demand, residual_demand, len(residual_OD_list),
+                        np.sum(edges_df['t_avg']*edges_df['true_vol']/(quarter_demand*60)),
+                        np.sum(edges_df['length']*edges_df['true_vol']/(quarter_demand*1000)),
+                        np.mean(edges_df.nlargest(10, 'true_vol')['true_vol'])]))
                 
                 ### Travel time by road category
                 # edges_df['tot_t_hr{}_qt{}'.format(hour, quarter)] = np.round(edges_df['true_vol'] * edges_df['t_avg'], 2)
 
                 t_hour_1 = time.time()
                 ### log hour results before resetting the flow for the next time step
-                print('DY{}_HR{}_QT{}: {} sec, OD {}, {} residual'.format(day, hour, quarter, round(t_hour_1-t_hour_0, 3), quarter_demand, len(residual_OD_list)))
+                logging.info('DY{}_HR{}_QT{}: {} sec, OD {}, {} residual'.format(day, hour, quarter, round(t_hour_1-t_hour_0, 3), quarter_demand, len(residual_OD_list)))
                 gc.collect()
 
     # Output
-    # output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
+    # output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_nm=scen_nm, project_folder=project_folder)
     print('total non arrival {}'.format(tot_non_arrival))
     
     t_main_1 = time.time()
     print('total run time: {} sec \n\n\n\n\n'.format(t_main_1 - t_main_0))
-    return sta_stats, travel_time_list, all_OD.shape[0]
+    return travel_time_list, all_OD.shape[0]
 
-def main(random_seed=0, scen_id='base', damage_df=None, quarter_counts=4, project_folder='', od_chunk=False):
+def main(random_seed=0, scen_nm='base', quarter_counts=4):
 
-    # random_seed = 0#int(os.environ['RANDOM_SEED'])
-    # scen_id = 2#int(os.environ['SCEN_ID'])
-    print('random_seed', random_seed, 'scen_id', scen_id)
+    ### input files
+    network_file_edges = '/projects/tokyo_residential_above/network_inputs/edges_residual_demand.csv'
+    network_file_nodes = '/projects/tokyo_residential_above/network_inputs/nodes_residual_demand.csv'
+    demand_files = ["/projects/tokyo_residential_above/demand_inputs/od_residual_demand_0.csv",
+                    "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_1.csv",
+                    "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_2.csv"]
+    simulation_outputs = '/projects/tokyo_residential_above/simulation_outputs'
+    damage_file_edges = None
+
+    ### random seed and logging
+    random.seed(random_seed)
+    np.random.seed(random_seed)
+    logger = logging.getLogger("residual_demand")
+    logging.basicConfig(filename=scratch_dir+simulation_outputs+'/log/{}.log'.format(scen_nm), filemode='w', format='%(asctime)s - %(message)s', level=logging.INFO)
+    logging.info(scen_nm)
 
     ### carry out sta/semi-dynamic assignment
-    sta_results = sta(random_seed=random_seed, quarter_counts=quarter_counts, scen_id=scen_id, damage_df=damage_df, project_folder=project_folder, od_chunk=od_chunk)
-    sta_stats = sta_results[0]
-    travel_time_list = sta_results[1]
-    total_od_counts = sta_results[2]
+    with open(scratch_dir+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_nm),'w') as stats_outfile:
+        stats_outfile.write(",".join(['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol']))
+    sta_results = sta(random_seed=random_seed, 
+        quarter_counts=quarter_counts, scen_nm=scen_nm, damage_file_edges=damage_file_edges, 
+        network_file_nodes=network_file_nodes, network_file_edges=network_file_edges, demand_files=demand_files, simulation_outputs=simulation_outputs)
+    # sta_stats = sta_results[0]
+    # travel_time_list = sta_results[1]
+    # total_od_counts = sta_results[2]
 
     ### origanize results
-    sta_stats_df = pd.DataFrame(sta_stats, columns=['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol'])
-    sta_stats_df.to_csv(absolute_path+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_id), index=False)
-    print('total travel hours', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_min'])/60)
-    print('total travel km', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_km']))
+    # sta_stats_df = pd.DataFrame(sta_stats, columns=['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol'])
+    # sta_stats_df.to_csv(scratch_dir+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_nm), index=False)
+    # logging.info('total travel hours', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_min'])/60)
+    # logging.info('total travel km', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_km']))
 
 
 if __name__ == '__main__':
-    project_folder = '/projects/los_angeles'
-    main(random_seed=0, scen_id='scag_5pct', damage_df=None, quarter_counts=4, project_folder=project_folder, od_chunk=False)
+    main(random_seed=0, scen_nm='base', quarter_counts=4)
 
