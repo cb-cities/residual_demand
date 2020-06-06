@@ -3,6 +3,7 @@ import os
 import gc 
 import sys
 import time 
+import random
 import logging
 import numpy as np
 import pandas as pd 
@@ -11,14 +12,16 @@ import scipy.io as sio
 from heapq import nlargest
 import scipy.sparse as ssparse
 from multiprocessing import Pool 
-### user library
-sys.path.insert(0, home_dir+'/..')
-from sp import interface
+
+from line_profiler import LineProfiler
 
 ### dir
 home_dir = os.environ['HOME']+'/residual_demand'
 work_dir = os.environ['WORK']+'/residual_demand'
 scratch_dir = os.environ['SCRATCH']+'/residual_demand'
+### user library
+sys.path.insert(0, home_dir+'/..')
+from sp import interface
 
 def map_edge_flow_residual(arg):
     ### Find shortest path for each unique origin --> one destination
@@ -44,7 +47,20 @@ def map_edge_flow_residual(arg):
             print(origin_ID, destin_ID, sp_dist)
         sp.clear()
         
-        sub_edges_df = edges_df[(edges_df['start_sp'].isin(sp_route_df['start_sp'])) & (edges_df['end_sp'].isin(sp_route_df['end_sp']))]
+        try:
+            sub_edges_df = edges_df[(edges_df['start_sp'].isin(sp_route_df['start_sp'])) & (edges_df['end_sp'].isin(sp_route_df['end_sp']))]
+            print(0, agent_id, origin_ID, destin_ID, 
+            edges_df.shape, max(edges_df.index), min(edges_df.index), max(edges_df['start_sp']), min(edges_df['start_sp']), max(edges_df['end_sp']), min(edges_df['end_sp']), 
+            sp_route_df.shape, max(sp_route_df.index), min(sp_route_df.index), max(sp_route_df['start_sp']), min(sp_route_df['start_sp']), max(sp_route_df['end_sp']), min(sp_route_df['end_sp']))
+        except IndexError:
+            pd.set_option('display.max_rows', 100)
+            print(1, agent_id, origin_ID, destin_ID, 
+            edges_df.shape, max(edges_df.index), min(edges_df.index), max(edges_df['start_sp']), min(edges_df['start_sp']), max(edges_df['end_sp']), min(edges_df['end_sp']), 
+            sp_route_df.shape, max(sp_route_df.index), min(sp_route_df.index), max(sp_route_df['start_sp']), min(sp_route_df['start_sp']), max(sp_route_df['end_sp']), min(sp_route_df['end_sp']))
+        if sub_edges_df.shape[0]==0:
+            print(2, agent_id, origin_ID, destin_ID, 
+            edges_df.shape, max(edges_df.index), min(edges_df.index), max(edges_df['start_sp']), min(edges_df['start_sp']), max(edges_df['end_sp']), min(edges_df['end_sp']), 
+            sp_route_df.shape, max(sp_route_df.index), min(sp_route_df.index), max(sp_route_df['start_sp']), min(sp_route_df['start_sp']), max(sp_route_df['end_sp']), min(sp_route_df['end_sp']))
         sp_route_df = sp_route_df.merge(sub_edges_df[['start_sp', 'end_sp', 'previous_t', 'true_vol']], on=['start_sp', 'end_sp'], how='left')
         sp_route_df['timestamp'] = sp_route_df['previous_t'].cumsum()
 
@@ -148,7 +164,7 @@ def read_OD(nodes_df=None, demand_files=None):
     ### Read OD from a list of files
     od_list = []
     for demand_file in demand_files:
-        sub_od = pd.read_csv(work_dir+'{}/demand_inputs/od_residual_demand_{}.csv'.format(project_folder, chunk_num))
+        sub_od = pd.read_csv(demand_file)
         od_list.append(sub_od)
     OD = pd.concat(od_list, ignore_index=True)
 
@@ -162,15 +178,16 @@ def read_OD(nodes_df=None, demand_files=None):
     OD['destin_sp'] = OD['node_id_igraph_D'] + 1
     OD = OD[['agent_id', 'origin_sp', 'destin_sp', 'hour']]
     OD = OD.iloc[0:1000]
-    logging.info('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
 
     t_OD_1 = time.time()
+    logging.info('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
     return OD
 
 def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_nm=None, simulation_outputs=None):
 
     ### Aggregate and calculate link-level variables after all increments
-    edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg', 2}).to_csv(simulation_outputs+'/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(scen_nm, random_seed, day, hour, quarter), index=False)
+    # edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg', 2}).to_csv(simulation_outputs+'/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(scen_nm, random_seed, day, hour, quarter), index=False)
+    edges_df.loc[edges_df['tot_vol']>0, ['type', 'tot_vol', 'true_vol', 't_avg']].to_csv(simulation_outputs+'/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(scen_nm, random_seed, day, hour, quarter), index=True)
 
 def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=None, 
         network_file_nodes=None, network_file_edges=None, demand_files=None, simulation_outputs=None):
@@ -184,17 +201,20 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
     global edges_df ### link weights
 
     ### Read in the edge attribute for volume delay calculation later
-    edges_df0 = pd.read_csv(work_dir+network_file_edges)
-    nodes_df = pd.read_csv(work_dir+network_file_nodes)
+    edges_df0 = pd.read_csv(network_file_edges)
+    edges_df0['start_end_sp'] = edges_df0['start_sp']+'-'edges_df0['end_sp']
+    edges_df0 = edges_df0.set_index(start_end_sp)
+    nodes_df = pd.read_csv(network_file_nodes)
     ### damage
     if damage_file_edges is not None:
-        damange_df = pd.read_csv(work_dir+damage_file_edges)
+        damange_df = pd.read_csv(damage_file_edges)
         edges_df0.loc[edges_df0['edge_id_igraph'].isin(damage_df['edge_id_igraph']), 'fft'] = 10e7
 
     node_count = max(len(np.unique(edges_df0['start_igraph'])), len(np.unique(edges_df0['end_igraph'])))
     g_coo = ssparse.coo_matrix((edges_df0['fft']*1.2, (edges_df0['start_igraph'], edges_df0['end_igraph'])), shape=(node_count, node_count))
-    edges_df0 = edges_df0[['edge_id_igraph', 'start_sp', 'end_sp', 'length', 'capacity', 'fft', 'type']]
-    sio.mmwrite(scratch_dir+simulation_outputs+'/network_sparse_scen{}_r{}.mtx'.format(scen_nm, random_seed), g_coo)
+    # edges_df0 = edges_df0[['edge_id_igraph', 'start_sp', 'end_sp', 'length', 'capacity', 'fft', 'type']]
+    edges_df0 = edges_df0[['length', 'capacity', 'fft', 'type']]
+    sio.mmwrite(simulation_outputs+'/network_sparse_scen{}_r{}.mtx'.format(scen_nm, random_seed), g_coo)
 
     all_OD = read_OD(nodes_df = nodes_df, demand_files=demand_files)
 
@@ -215,10 +235,28 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
     for day in ['na']:
 
         ### Read in the initial network (free flow travel time
-        g = interface.readgraph(bytes(scratch_dir+simulation_outputs+'/network_sparse_scen{}_r{}.mtx'.format(scen_nm, random_seed), encoding='utf-8'))
+        g = interface.readgraph(bytes(simulation_outputs+'/network_sparse_scen{}_r{}.mtx'.format(scen_nm, random_seed), encoding='utf-8'))
         ### test damage
-        # test_sp = g.dijkstra(31269, 131637)
-        # print(test_sp.distance(131637), [edge for edge in test_sp.route(131637)])
+        # test_sp = g.dijkstra(253182, 253708)
+        # print(test_sp.distance(253708), [edge for edge in test_sp.route(253708)])
+        # sp_route_df = pd.DataFrame([edge for edge in test_sp.route(253708)], columns=['start_sp', 'end_sp'])
+        # print(sp_route_df.shape)
+        # test_sp.clear()
+        # sub_edges_df = edges_df0[edges_df0['start_sp'].isin(sp_route_df['start_sp']) & edges_df0['end_sp'].isin(sp_route_df['end_sp'])]
+        # print(sub_edges_df.shape, sp_route_df.shape)
+        # print(sub_edges_df)
+        # print(edges_df0[edges_df0['start_sp'].isin(sp_route_df['start_sp'])])
+        # print(edges_df0[edges_df0['end_sp'].isin(sp_route_df['end_sp'])])
+        # sys.exit(0)
+
+        # test_sp = g.dijkstra(511231, 622140)
+        # print(test_sp.distance(622140))
+        # sp_route_df = pd.DataFrame([edge for edge in test_sp.route(622140)], columns=['start_sp', 'end_sp'])
+        # print(sp_route_df.shape)
+        # print(sp_route_df)
+        # test_sp.clear()
+        # sub_edges_df = edges_df0[(edges_df0['start_sp'].isin(sp_route_df['start_sp'].iloc[list(range(80))])) & (edges_df0['end_sp'].isin(sp_route_df['end_sp'].iloc[list(range(80))]))]
+        # print(sub_edges_df.shape, sp_route_df.shape)
         # sys.exit(0)
 
         ### Variables reset at the beginning of each day
@@ -227,7 +265,7 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
         edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
-        for hour in range(3,5):
+        for hour in range(3,4):
 
             t_hour_0 = time.time()
 
@@ -298,12 +336,12 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
 
                 ### stats
                 ### step outputs
-                with open(scratch_dir+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_nm),'w+') as stats_outfile:
-                    stats_outfile.write(",".join([random_seed, day, hour, quarter, 
+                with open(simulation_outputs+'/stats/stats_scen{}.csv'.format(scen_nm),'a') as stats_outfile:
+                    stats_outfile.write(",".join([str(x) for x in [random_seed, day, hour, quarter, 
                         quarter_demand, residual_demand, len(residual_OD_list),
                         np.sum(edges_df['t_avg']*edges_df['true_vol']/(quarter_demand*60)),
                         np.sum(edges_df['length']*edges_df['true_vol']/(quarter_demand*1000)),
-                        np.mean(edges_df.nlargest(10, 'true_vol')['true_vol'])]))
+                        np.mean(edges_df.nlargest(10, 'true_vol')['true_vol'])]])+"\n")
                 
                 ### Travel time by road category
                 # edges_df['tot_t_hr{}_qt{}'.format(hour, quarter)] = np.round(edges_df['true_vol'] * edges_df['t_avg'], 2)
@@ -324,38 +362,41 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
 def main(random_seed=0, scen_nm='base', quarter_counts=4):
 
     ### input files
-    network_file_edges = '/projects/tokyo_residential_above/network_inputs/edges_residual_demand.csv'
-    network_file_nodes = '/projects/tokyo_residential_above/network_inputs/nodes_residual_demand.csv'
-    demand_files = ["/projects/tokyo_residential_above/demand_inputs/od_residual_demand_0.csv",
-                    "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_1.csv",
-                    "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_2.csv"]
-    simulation_outputs = '/projects/tokyo_residential_above/simulation_outputs'
+    print('main')
+    network_file_edges = work_dir+'/projects/tokyo_residential_above/network_inputs/edges_residual_demand.csv'
+    network_file_nodes = work_dir+'/projects/tokyo_residential_above/network_inputs/nodes_residual_demand.csv'
+    demand_files = [work_dir+"/projects/tokyo_residential_above/demand_inputs/od_residual_demand_0.csv",
+                   work_dir + "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_1.csv",
+                   work_dir + "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_2.csv"]
+    simulation_outputs = scratch_dir + '/projects/tokyo_residential_above/simulation_outputs'
     damage_file_edges = None
 
     ### random seed and logging
     random.seed(random_seed)
     np.random.seed(random_seed)
     logger = logging.getLogger("residual_demand")
-    logging.basicConfig(filename=scratch_dir+simulation_outputs+'/log/{}.log'.format(scen_nm), filemode='w', format='%(asctime)s - %(message)s', level=logging.INFO)
+    logging.basicConfig(filename=simulation_outputs+'/log/{}.log'.format(scen_nm), filemode='w', format='%(asctime)s - %(message)s', level=logging.INFO)
     logging.info(scen_nm)
 
     ### carry out sta/semi-dynamic assignment
-    with open(scratch_dir+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_nm),'w') as stats_outfile:
-        stats_outfile.write(",".join(['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol']))
+    with open(simulation_outputs+'/stats/stats_scen{}.csv'.format(scen_nm),'w') as stats_outfile:
+        stats_outfile.write(",".join(['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol'])+"\n")
     sta_results = sta(random_seed=random_seed, 
         quarter_counts=quarter_counts, scen_nm=scen_nm, damage_file_edges=damage_file_edges, 
         network_file_nodes=network_file_nodes, network_file_edges=network_file_edges, demand_files=demand_files, simulation_outputs=simulation_outputs)
-    # sta_stats = sta_results[0]
-    # travel_time_list = sta_results[1]
-    # total_od_counts = sta_results[2]
-
-    ### origanize results
-    # sta_stats_df = pd.DataFrame(sta_stats, columns=['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol'])
-    # sta_stats_df.to_csv(scratch_dir+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_nm), index=False)
-    # logging.info('total travel hours', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_min'])/60)
-    # logging.info('total travel km', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_km']))
-
 
 if __name__ == '__main__':
-    main(random_seed=0, scen_nm='base', quarter_counts=4)
+    lp = LineProfiler()
+    lp.add_function(sta)
+    lp.add_function(output_edges_df)
+    lp.add_function(read_OD)
+    lp.add_function(update_graph)
+    lp.add_function(map_reduce_edge_flow)
+    lp.add_function(reduce_edge_flow_pd)
+    lp_wrapper = lp(main)
+    lp.run('main()')
+    lp.print_stats()
+    # python3 residual_demand_assignment.py > $SCRATCH/residual_demand/projects/tokyo_residential_above/simulation_outputs/profile_output.txt
+
+    # main(random_seed=0, scen_nm='base', quarter_counts=4)
 

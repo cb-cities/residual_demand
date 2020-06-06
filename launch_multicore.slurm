@@ -1,0 +1,34 @@
+#!/bin/bash
+#SBATCH -J tokyo
+#SBATCH -o a10000.out
+#SBATCH -e a10000.err
+#SBATCH -t 01:30:00
+#SBATCH -p skx-normal
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=40
+
+module purge
+module load TACC
+module load launcher
+module load python3
+source $HOME/virtualenvs/cities/bin/activate
+export OMP_NUM_THREADS=40
+
+### folder in $SCRATCH to hold output
+scratch_folder=$SCRATCH/residual_demand/projects/tokyo_residential_above/simulation_outputs
+mkdir -p $scratch_folder
+mkdir -p $scratch_folder/log
+mkdir -p $scratch_folder/stats
+mkdir -p $scratch_folder/edges_df
+
+# Launcher to use multicores on node
+export LAUNCHER_WORKDIR=$PWD
+export LAUNCHER_PPN=1
+export LAUNCHER_JOB_FILE=joblist_a100000
+export LAUNCHER_SCHED=interleaved
+
+$LAUNCHER_DIR/paramrun
+
+# cd $scratch_folder
+# tar czf ../t_stats_$(date +"%FT%H%M%S").tar.gz t_stats

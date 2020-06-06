@@ -1,0 +1,1 @@
+python3 -c 'import residual_demand_assignment; residual_demand_assignment.main(random_seed=0, scen_nm='base', quarter_counts=4)'
