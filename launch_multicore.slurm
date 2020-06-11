@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -J tokyo
-#SBATCH -o a10000.out
-#SBATCH -e a10000.err
-#SBATCH -t 01:30:00
+#SBATCH -o a22m.out
+#SBATCH -e a22m.err
+#SBATCH -t 10:00:00
 #SBATCH -p skx-normal
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
@@ -25,7 +25,7 @@ mkdir -p $scratch_folder/edges_df
 # Launcher to use multicores on node
 export LAUNCHER_WORKDIR=$PWD
 export LAUNCHER_PPN=1
-export LAUNCHER_JOB_FILE=joblist_a100000
+export LAUNCHER_JOB_FILE=joblist_a22m
 export LAUNCHER_SCHED=interleaved
 
 $LAUNCHER_DIR/paramrun

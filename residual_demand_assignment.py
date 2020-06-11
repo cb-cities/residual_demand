@@ -5,12 +5,14 @@ import sys
 import time 
 import random
 import logging
+import cProfile
 import numpy as np
 import pandas as pd 
 from ctypes import *
 import scipy.io as sio
 from heapq import nlargest
 import scipy.sparse as ssparse
+from collections import Counter
 from multiprocessing import Pool 
 
 from line_profiler import LineProfiler
@@ -38,42 +40,26 @@ def map_edge_flow_residual(arg):
     
     if sp_dist > 10e7:
         sp.clear()
-        return {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'route': pd.DataFrame([], columns=['start_sp', 'end_sp']), 'arr': 'n'} ### empty path; not reach destination; travel time 0
+        return {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'route': [], 'arr': 'n'} ### empty path; not reach destination; travel time 0
     else:
         sp_route = sp.route(destin_ID) ### agent route planned with imperfect information
-        try:
-            sp_route_df = pd.DataFrame([edge for edge in sp_route], columns=['start_sp', 'end_sp'])
-        except RecursionError:
-            print(origin_ID, destin_ID, sp_dist)
+        sp_route_list = ["%s-%s"%edge for edge in sp_route]
         sp.clear()
         
-        try:
-            sub_edges_df = edges_df[(edges_df['start_sp'].isin(sp_route_df['start_sp'])) & (edges_df['end_sp'].isin(sp_route_df['end_sp']))]
-            print(0, agent_id, origin_ID, destin_ID, 
-            edges_df.shape, max(edges_df.index), min(edges_df.index), max(edges_df['start_sp']), min(edges_df['start_sp']), max(edges_df['end_sp']), min(edges_df['end_sp']), 
-            sp_route_df.shape, max(sp_route_df.index), min(sp_route_df.index), max(sp_route_df['start_sp']), min(sp_route_df['start_sp']), max(sp_route_df['end_sp']), min(sp_route_df['end_sp']))
-        except IndexError:
-            pd.set_option('display.max_rows', 100)
-            print(1, agent_id, origin_ID, destin_ID, 
-            edges_df.shape, max(edges_df.index), min(edges_df.index), max(edges_df['start_sp']), min(edges_df['start_sp']), max(edges_df['end_sp']), min(edges_df['end_sp']), 
-            sp_route_df.shape, max(sp_route_df.index), min(sp_route_df.index), max(sp_route_df['start_sp']), min(sp_route_df['start_sp']), max(sp_route_df['end_sp']), min(sp_route_df['end_sp']))
-        if sub_edges_df.shape[0]==0:
-            print(2, agent_id, origin_ID, destin_ID, 
-            edges_df.shape, max(edges_df.index), min(edges_df.index), max(edges_df['start_sp']), min(edges_df['start_sp']), max(edges_df['end_sp']), min(edges_df['end_sp']), 
-            sp_route_df.shape, max(sp_route_df.index), min(sp_route_df.index), max(sp_route_df['start_sp']), min(sp_route_df['start_sp']), max(sp_route_df['end_sp']), min(sp_route_df['end_sp']))
-        sp_route_df = sp_route_df.merge(sub_edges_df[['start_sp', 'end_sp', 'previous_t', 'true_vol']], on=['start_sp', 'end_sp'], how='left')
+        sp_route_df = edges_df[['previous_t']].reindex(sp_route_list)
         sp_route_df['timestamp'] = sp_route_df['previous_t'].cumsum()
-
         trunc_sp_route_df = sp_route_df[sp_route_df['timestamp']<(3600/quarter_counts)]
         try:
-            stop_node = trunc_sp_route_df.iloc[-1]['end_sp']
+            stop_node = int(trunc_sp_route_df.index[-1].split('-')[1])
             travel_time = trunc_sp_route_df.iloc[-1]['timestamp']
         except IndexError:
             ### cannot pass even the first link
             link_time = sp_route_df.iloc[0]['timestamp']
-            stop_node = np.random.choice([sp_route_df.iloc[0]['start_sp'], sp_route_df.iloc[0]['end_sp']], p=[1-(3600/quarter_counts)/link_time, (3600/quarter_counts)/link_time])
+            stop_node = np.random.choice([
+                int(sp_route_df.index[0].split('-')[0]), int(sp_route_df.index[0].split('-')[1])], 
+                p=[1-(3600/quarter_counts)/link_time, (3600/quarter_counts)/link_time])
             travel_time = 3600/quarter_counts
-        trunc_edges = trunc_sp_route_df[['start_sp', 'end_sp']]
+        trunc_edges = trunc_sp_route_df.index.tolist()
 
         return {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'h_sp': stop_node, 'travel_time': travel_time, 'route': trunc_edges, 'arr': 'a'}
 
@@ -81,8 +67,8 @@ def reduce_edge_flow_pd(agent_info_routes_found, day, hour, quarter, ss_id):
     ### Reduce (count the total traffic flow per edge) with pandas groupby
 
     t0 = time.time()
-    df_L = pd.concat([r['route'] for r in agent_info_routes_found])
-    df_L_flow = df_L.groupby(['start_sp', 'end_sp']).size().reset_index().rename(columns={0: 'ss_vol'}) # link_flow counts the number of vehicles, link_probe counts the number of probe vehicles
+    df_L = [edge for r in agent_info_routes_found for edge in r['route']]
+    df_L_flow = pd.DataFrame.from_dict(Counter(df_L), orient='index', columns=['ss_vol']) # link_flow counts the number of vehicles, link_probe counts the number of probe vehicles
     t1 = time.time()
     
     return df_L_flow
@@ -94,11 +80,11 @@ def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
     ### skip when no OD calculation is required
     unique_origin = OD_ss.shape[0]
     if unique_origin == 0:
-        return pd.DataFrame([], columns=['start_sp', 'end_sp', 'ss_vol']), [], [], 0
+        return pd.DataFrame.from_dict({}, orient='index', columns=['ss_vol']), [], [], 0
 
     ### Build a pool
     process_count = 40
-    pool = Pool(processes=process_count)
+    pool = Pool(process_count)
 
     ### Find shortest pathes
     res = pool.imap_unordered(map_edge_flow_residual, [(i, quarter_counts) for i in range(unique_origin)])
@@ -128,24 +114,26 @@ def update_graph(edge_volume, edges_df, day, hour, quarter, ss_id, quarter_deman
     t_update_0 = time.time()
 
     ### first update the cumulative link volume in the current time step
-    edges_df = pd.merge(edges_df, edge_volume, how='left', on=['start_sp', 'end_sp'])
-    edges_df = edges_df.fillna(value={'ss_vol': 0}) ### fill volume for unused edges as 0
-    edges_df['true_vol'] += edges_df['ss_vol'] ### update the total volume (newly assigned + carry over)
-    edges_df['tot_vol'] += edges_df['ss_vol'] ### tot_vol is not reset to 0 at each time step
+    edge_volume_expand = edge_volume.reindex(edges_df.index, fill_value=0)
+    edge_volume_expand['ss_vol'] = edge_volume_expand['ss_vol'].astype(int)
+    edges_df['true_vol'] += edge_volume_expand['ss_vol']
+    edges_df['tot_vol'] += edge_volume_expand['ss_vol']
 
     ### True flux
     edges_df['true_flow'] = (edges_df['true_vol']*quarter_demand/assigned_demand)*quarter_counts ### divided by 0.25 h to get the hourly flow.
     edges_df['t_avg'] = edges_df['fft']*(1 + 0.6*(edges_df['true_flow']/edges_df['capacity'])**4)*1.2
-    update_df = edges_df.loc[edges_df['t_avg'] != edges_df['previous_t']].copy().reset_index()
+    edges_df['t_avg'] = edges_df['t_avg'].round(2)
+    update_df = edges_df[edges_df['t_avg'] != edges_df['previous_t']]
 
     if update_df.shape[0] == 0:
         pass
     else:
         for row in update_df.itertuples():
-            g.update_edge(getattr(row,'start_sp'), getattr(row,'end_sp'), c_double(getattr(row,'t_avg')))
+            edge_s, edge_e = getattr(row,'Index').split('-')
+            g.update_edge(int(edge_s), int(edge_e), c_double(getattr(row,'t_avg')))
 
     edges_df['previous_t'] = edges_df['t_avg']
-    edges_df = edges_df.drop(columns=['ss_vol'])
+    # edges_df = edges_df.drop(columns=['ss_vol'])
 
     ### test damage
     #test_sp = g.dijkstra(112661,94033)
@@ -177,7 +165,7 @@ def read_OD(nodes_df=None, demand_files=None):
     OD['origin_sp'] = OD['node_id_igraph_O'] + 1 ### the node id in module sp is 1 higher than igraph id
     OD['destin_sp'] = OD['node_id_igraph_D'] + 1
     OD = OD[['agent_id', 'origin_sp', 'destin_sp', 'hour']]
-    OD = OD.iloc[0:1000]
+    # OD = OD.iloc[0:7000000]
 
     t_OD_1 = time.time()
     logging.info('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
@@ -186,7 +174,6 @@ def read_OD(nodes_df=None, demand_files=None):
 def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_nm=None, simulation_outputs=None):
 
     ### Aggregate and calculate link-level variables after all increments
-    # edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg', 2}).to_csv(simulation_outputs+'/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(scen_nm, random_seed, day, hour, quarter), index=False)
     edges_df.loc[edges_df['tot_vol']>0, ['type', 'tot_vol', 'true_vol', 't_avg']].to_csv(simulation_outputs+'/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(scen_nm, random_seed, day, hour, quarter), index=True)
 
 def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=None, 
@@ -202,8 +189,10 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
 
     ### Read in the edge attribute for volume delay calculation later
     edges_df0 = pd.read_csv(network_file_edges)
-    edges_df0['start_end_sp'] = edges_df0['start_sp']+'-'edges_df0['end_sp']
-    edges_df0 = edges_df0.set_index(start_end_sp)
+    edges_df0['start_end_sp'] = edges_df0['start_sp'].astype(str)+'-'+edges_df0['end_sp'].astype(str)
+    edges_df0 = edges_df0.drop_duplicates(subset=['start_end_sp'], keep='first')
+    edges_df0['capacity'] = np.where(edges_df0['capacity']==0, 950, edges_df0['capacity'])
+    edges_df0 = edges_df0.set_index('start_end_sp')
     nodes_df = pd.read_csv(network_file_nodes)
     ### damage
     if damage_file_edges is not None:
@@ -236,28 +225,6 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
 
         ### Read in the initial network (free flow travel time
         g = interface.readgraph(bytes(simulation_outputs+'/network_sparse_scen{}_r{}.mtx'.format(scen_nm, random_seed), encoding='utf-8'))
-        ### test damage
-        # test_sp = g.dijkstra(253182, 253708)
-        # print(test_sp.distance(253708), [edge for edge in test_sp.route(253708)])
-        # sp_route_df = pd.DataFrame([edge for edge in test_sp.route(253708)], columns=['start_sp', 'end_sp'])
-        # print(sp_route_df.shape)
-        # test_sp.clear()
-        # sub_edges_df = edges_df0[edges_df0['start_sp'].isin(sp_route_df['start_sp']) & edges_df0['end_sp'].isin(sp_route_df['end_sp'])]
-        # print(sub_edges_df.shape, sp_route_df.shape)
-        # print(sub_edges_df)
-        # print(edges_df0[edges_df0['start_sp'].isin(sp_route_df['start_sp'])])
-        # print(edges_df0[edges_df0['end_sp'].isin(sp_route_df['end_sp'])])
-        # sys.exit(0)
-
-        # test_sp = g.dijkstra(511231, 622140)
-        # print(test_sp.distance(622140))
-        # sp_route_df = pd.DataFrame([edge for edge in test_sp.route(622140)], columns=['start_sp', 'end_sp'])
-        # print(sp_route_df.shape)
-        # print(sp_route_df)
-        # test_sp.clear()
-        # sub_edges_df = edges_df0[(edges_df0['start_sp'].isin(sp_route_df['start_sp'].iloc[list(range(80))])) & (edges_df0['end_sp'].isin(sp_route_df['end_sp'].iloc[list(range(80))]))]
-        # print(sub_edges_df.shape, sp_route_df.shape)
-        # sys.exit(0)
 
         ### Variables reset at the beginning of each day
         edges_df = edges_df0.copy() ### length, capacity and fft that should never change in one simulation
@@ -265,7 +232,7 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
         edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
-        for hour in range(3,4):
+        for hour in range(3,20):
 
             t_hour_0 = time.time()
 
@@ -352,10 +319,8 @@ def sta(random_seed=None, quarter_counts=None, scen_nm=None, damage_file_edges=N
                 gc.collect()
 
     # Output
-    # output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_nm=scen_nm, project_folder=project_folder)
-    print('total non arrival {}'.format(tot_non_arrival))
-    
     t_main_1 = time.time()
+    print('total non arrival {}'.format(tot_non_arrival))
     print('total run time: {} sec \n\n\n\n\n'.format(t_main_1 - t_main_0))
     return travel_time_list, all_OD.shape[0]
 
@@ -385,6 +350,18 @@ def main(random_seed=0, scen_nm='base', quarter_counts=4):
         quarter_counts=quarter_counts, scen_nm=scen_nm, damage_file_edges=damage_file_edges, 
         network_file_nodes=network_file_nodes, network_file_edges=network_file_edges, demand_files=demand_files, simulation_outputs=simulation_outputs)
 
+# def profile(random_seed=0, scen_nm='base', quarter_counts=4):
+#     lp = LineProfiler()
+#     lp.add_function(sta)
+#     lp.add_function(output_edges_df)
+#     lp.add_function(read_OD)
+#     lp.add_function(update_graph)
+#     lp.add_function(map_reduce_edge_flow)
+#     lp.add_function(reduce_edge_flow_pd)
+#     lp_wrapper = lp(main)
+#     lp.run('main()')
+#     lp.print_stats()
+
 if __name__ == '__main__':
     lp = LineProfiler()
     lp.add_function(sta)
@@ -398,5 +375,5 @@ if __name__ == '__main__':
     lp.print_stats()
     # python3 residual_demand_assignment.py > $SCRATCH/residual_demand/projects/tokyo_residential_above/simulation_outputs/profile_output.txt
 
-    # main(random_seed=0, scen_nm='base', quarter_counts=4)
+    main(random_seed=0, scen_nm='base_a22m', quarter_counts=4)
 
