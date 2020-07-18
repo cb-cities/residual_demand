@@ -182,7 +182,7 @@ def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_id=None
 
     ### Aggregate and calculate link-level variables after all increments
     # edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
-    edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg', 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
+    edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
 
 def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project_folder=None, od_chunk=False):
 
@@ -202,6 +202,8 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
     if damage_df is None:
         pass
     else:
+        ### each damaged osmid could have more than one edge_id_igraph
+        damage_df = damage_df.merge(edges_df0[['edge_osmid', 'edge_id_igraph']], how='left', on='edge_osmid')
         edges_df0.loc[edges_df0['edge_id_igraph'].isin(damage_df['edge_id_igraph']), 'fft'] = 10e7
 
     node_count = max(len(np.unique(edges_df0['start_igraph'])), len(np.unique(edges_df0['end_igraph'])))
@@ -240,7 +242,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
         edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
-        for hour in range(0,2):
+        for hour in range(0,5):
 
             t_hour_0 = time.time()
 
@@ -326,7 +328,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
                 gc.collect()
 
     # Output
-    # output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
+    output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
     print('total non arrival {}'.format(tot_non_arrival))
     
     t_main_1 = time.time()
@@ -354,5 +356,10 @@ def main(random_seed=0, scen_id='base', damage_df=None, quarter_counts=4, projec
 
 if __name__ == '__main__':
     project_folder = '/projects/los_angeles'
-    main(random_seed=0, scen_id='scag_5pct', damage_df=None, quarter_counts=4, project_folder=project_folder, od_chunk=False)
+
+    damage_df0 = pd.read_csv(absolute_path+'{}/network_inputs/bridge_closure/bridge_closure_day90.csv'.format(project_folder))
+    damage_links = damage_df0['OSMWayID1'].values.tolist() + damage_df0.dropna(subset=['OSMWayID2'])['OSMWayID2'].values.tolist()
+    damage_df = pd.DataFrame({'edge_osmid': damage_links})
+
+    main(random_seed=0, scen_id='scag_5pct_bc0', damage_df=None, quarter_counts=4, project_folder=project_folder, od_chunk=False)
 
