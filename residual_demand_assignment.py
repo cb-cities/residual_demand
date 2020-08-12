@@ -86,7 +86,7 @@ def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
         return pd.DataFrame([], columns=['start_sp', 'end_sp', 'ss_vol']), [], [], 0
 
     ### Build a pool
-    process_count = 50
+    process_count = 35
     pool = Pool(processes=process_count, maxtasksperchild=1000)
 
     ### Find shortest pathes
@@ -126,7 +126,7 @@ def update_graph(edge_volume, edges_df, day, hour, quarter, ss_id, quarter_deman
     edges_df = pd.merge(edges_df, edge_volume, how='left', on=['start_sp', 'end_sp'])
     edges_df = edges_df.fillna(value={'ss_vol': 0}) ### fill volume for unused edges as 0
     edges_df['true_vol'] += edges_df['ss_vol'] ### update the total volume (newly assigned + carry over)
-    edges_df['tot_vol'] += edges_df['ss_vol'] ### tot_vol is not reset to 0 at each time step
+    # edges_df['tot_vol'] += edges_df['ss_vol'] ### tot_vol is not reset to 0 at each time step
 
     ### True flux
     edges_df['true_flow'] = (edges_df['true_vol']*quarter_demand/assigned_demand)*quarter_counts ### divided by 0.25 h to get the hourly flow.
@@ -172,7 +172,7 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
     if 'hour' not in OD.columns:
         OD['hour'] = 0
     OD = OD[['agent_id', 'origin_sp', 'destin_sp', 'hour']]
-    OD = OD.iloc[0:100000]
+    # OD = OD.iloc[0:100000]
 
     t_OD_1 = time.time()
     print('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
@@ -181,8 +181,8 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
 def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_id=None, project_folder=None):
 
     ### Aggregate and calculate link-level variables after all increments
-    # edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
-    edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
+    # edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
+    edges_df.loc[edges_df['true_vol']>0, ['edge_id_igraph', 'type', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
 
 def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project_folder=None, od_chunk=False):
 
@@ -239,7 +239,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
         ### Variables reset at the beginning of each day
         edges_df = edges_df0.copy() ### length, capacity and fft that should never change in one simulation
         edges_df['previous_t'] = edges_df['fft'] ### Used to find which edge to update. At the beginning of each day, previous_t is the free flow time.
-        edges_df['tot_vol'] = 0
+        # edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
         for hour in range(0,5):
@@ -361,5 +361,5 @@ if __name__ == '__main__':
     damage_links = damage_df0['OSMWayID1'].values.tolist() + damage_df0.dropna(subset=['OSMWayID2'])['OSMWayID2'].values.tolist()
     damage_df = pd.DataFrame({'edge_osmid': damage_links})
 
-    main(random_seed=0, scen_id='scag_5pct_bc0', damage_df=None, quarter_counts=4, project_folder=project_folder, od_chunk=False)
+    main(random_seed=0, scen_id='scag_5pct_bc0_test', damage_df=None, quarter_counts=4, project_folder=project_folder, od_chunk=False)
 
