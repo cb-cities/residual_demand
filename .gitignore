@@ -1,5 +1,6 @@
-sp/
 projects/
+joblist*
+**/*.err
 **/*.out
 **/*.csv
 **/*.mtx

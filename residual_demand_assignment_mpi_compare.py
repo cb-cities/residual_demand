@@ -17,10 +17,8 @@ from heapq import nlargest
 import shapely.wkt
 
 pd.set_option('display.max_columns', 10)
-sys.setrecursionlimit(2000)
 
 absolute_path = os.path.dirname(os.path.abspath(__file__))
-output_path = '/global/scratch/bz247/residual_demand'
 sys.path.insert(0, absolute_path+'/../')
 sys.path.insert(0, '/home/bingyu/')
 from sp import interface 
@@ -29,65 +27,83 @@ def map_edge_flow_residual(arg):
     ### Find shortest path for each unique origin --> one destination
     ### In the future change to multiple destinations
     
+    t_map_0 = time.time()
     row = arg[0]
     quarter_counts = arg[1]
+
     agent_id = int(OD_ss['agent_id'].iloc[row])
     origin_ID = int(OD_ss['origin_sp'].iloc[row])
     destin_ID = int(OD_ss['destin_sp'].iloc[row])
 
+    t_map_1 = time.time()
     sp = g.dijkstra(origin_ID, destin_ID) ### g_0 is the network with imperfect information for route planning
+    
+    t_map_2 = time.time()
     sp_dist = sp.distance(destin_ID) ### agent believed travel time with imperfect information
     
     if sp_dist > 10e7:
+        # print(agent_id, sp_dist)
         sp.clear()
-        return {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'route': pd.DataFrame([], columns=['start_sp', 'end_sp']), 'arr': 'n'} ### empty path; not reach destination; travel time 0
+        t_map_3 = time.time()
+        t_map_4 = time.time()
+        return {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'route': pd.DataFrame([], columns=['start_sp', 'end_sp']), 'arr': 'n'}, [t_map_4 - t_map_3, t_map_2 - t_map_1] ### empty path; not reach destination; travel time 0
     else:
         sp_route = sp.route(destin_ID) ### agent route planned with imperfect information
-        try:
-            sp_route_df = pd.DataFrame([edge for edge in sp_route], columns=['start_sp', 'end_sp'])
-        except RecursionError:
-            print(origin_ID, destin_ID, sp_dist)
-        sp.clear()
         
+        t_map_3 = time.time()
+        sp_route_df = pd.DataFrame([edge for edge in sp_route], columns=['start_sp', 'end_sp'])
+        #sp_route_df.insert(0, 'seq_id', range(sp_route_df.shape[0]))
         sub_edges_df = edges_df[(edges_df['start_sp'].isin(sp_route_df['start_sp'])) & (edges_df['end_sp'].isin(sp_route_df['end_sp']))]
+        sp.clear()
+
+        #sp_route_df = pd.merge(sp_route_df, sub_edges_df[['previous_t']], how='left')
         sp_route_df = sp_route_df.merge(sub_edges_df[['start_sp', 'end_sp', 'previous_t', 'true_vol']], on=['start_sp', 'end_sp'], how='left')
         sp_route_df['timestamp'] = sp_route_df['previous_t'].cumsum()
 
         trunc_sp_route_df = sp_route_df[sp_route_df['timestamp']<(3600/quarter_counts)]
+        #stop_node = trunc_sp_route_df.iloc[-1]['end_sp']
         try:
             stop_node = trunc_sp_route_df.iloc[-1]['end_sp']
             travel_time = trunc_sp_route_df.iloc[-1]['timestamp']
         except IndexError:
             ### cannot pass even the first link
+            #print(sp_route_df.iloc[0][['start_sp', 'end_sp', 'timestamp', 'true_vol','previous_t']])
             link_time = sp_route_df.iloc[0]['timestamp']
             stop_node = np.random.choice([sp_route_df.iloc[0]['start_sp'], sp_route_df.iloc[0]['end_sp']], p=[1-(3600/quarter_counts)/link_time, (3600/quarter_counts)/link_time])
             travel_time = 3600/quarter_counts
         trunc_edges = trunc_sp_route_df[['start_sp', 'end_sp']]
 
-        return {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'h_sp': stop_node, 'travel_time': travel_time, 'route': trunc_edges, 'arr': 'a'}
+        t_map_4 = time.time()
+        results = {'agent_id': agent_id, 'o_sp': origin_ID, 'd_sp': destin_ID, 'h_sp': stop_node, 'travel_time': travel_time, 'route': trunc_edges, 'arr': 'a'}
+        ### [(edge[0], edge[1]) for edge in sp_route]: agent's choice of route
+        return results, [t_map_4 - t_map_3, t_map_2 - t_map_1]
+
 
 def reduce_edge_flow_pd(agent_info_routes_found, day, hour, quarter, ss_id):
     ### Reduce (count the total traffic flow per edge) with pandas groupby
 
     t0 = time.time()
+    # flat_L = [(e[0], e[1], r['vol'], r['probe']) for r in agent_info_routes for e in zip(r['route'], r['route'][1:])]
+    # df_L = pd.DataFrame(flat_L, columns=['start_sp', 'end_sp', 'vol', 'probe'])
     df_L = pd.concat([r['route'] for r in agent_info_routes_found])
     df_L_flow = df_L.groupby(['start_sp', 'end_sp']).size().reset_index().rename(columns={0: 'ss_vol'}) # link_flow counts the number of vehicles, link_probe counts the number of probe vehicles
     t1 = time.time()
     # print('DY{}_HR{}_QT{} SS {}: reduce find {} edges, {} sec w/ pd.groupby, max substep volume {}'.format(day, hour, quarter, ss_id, df_L_flow.shape[0], t1-t0, np.max(df_L_flow['ss_vol'])))
     
-    return df_L_flow
+    return df_L_flow, t1 - t0
 
 def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
     ### One time step of ABM simulation
-
+    
     t_odsp_0 = time.time()
+
     ### skip when no OD calculation is required
     unique_origin = OD_ss.shape[0]
     if unique_origin == 0:
         return pd.DataFrame([], columns=['start_sp', 'end_sp', 'ss_vol']), [], [], 0
 
     ### Build a pool
-    process_count = 23
+    process_count = 5
     pool = Pool(processes=process_count, maxtasksperchild=1000)
 
     ### Find shortest pathes
@@ -96,15 +112,19 @@ def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
     ### Close the pool
     pool.close()
     pool.join()
+    # if len(multiprocessing.active_children())>0:
+    #     print(ss_id, len(multiprocessing.active_children()), OD_ss.shape, unique_origin)
+    #     sys.exit(0)
     t_odsp_1 = time.time()
 
     ### Organize results
-    agent_info_routes = list(res)
-    # agent_info_routes, agent_path_timing = zip(*res)
+    # agent_info_routes = list(res)
+    agent_info_routes, agent_path_timing = zip(*res)
+    # print(agent_path_timing)
     agent_info_routes_found = [a for a in agent_info_routes if a['arr']=='a']
     agent_info_routes_notfound = [a for a in agent_info_routes if a['arr']=='n']
 
-    edge_volume = reduce_edge_flow_pd(agent_info_routes_found, day, hour, quarter, ss_id)
+    edge_volume, reduce_timing = reduce_edge_flow_pd(agent_info_routes_found, day, hour, quarter, ss_id)
     # try:
     #     edge_volume = reduce_edge_flow_pd(agent_info_routes, day, hour, quarter, ss_id)
     # except TypeError:
@@ -127,11 +147,15 @@ def update_graph(edge_volume, edges_df, day, hour, quarter, ss_id, quarter_deman
     edges_df = pd.merge(edges_df, edge_volume, how='left', on=['start_sp', 'end_sp'])
     edges_df = edges_df.fillna(value={'ss_vol': 0}) ### fill volume for unused edges as 0
     edges_df['true_vol'] += edges_df['ss_vol'] ### update the total volume (newly assigned + carry over)
-    # edges_df['tot_vol'] += edges_df['ss_vol'] ### tot_vol is not reset to 0 at each time step
+    edges_df['tot_vol'] += edges_df['ss_vol'] ### tot_vol is not reset to 0 at each time step
 
     ### True flux
     edges_df['true_flow'] = (edges_df['true_vol']*quarter_demand/assigned_demand)*quarter_counts ### divided by 0.25 h to get the hourly flow.
-    edges_df['t_avg'] = edges_df['fft']*(1 + 0.6*(edges_df['true_flow']/edges_df['capacity'])**4)*1.2
+    #edges_df['true_flow'] = (edges_df['true_vol'])/0.25 
+
+    # edges_df['t_avg'] = edges_df['fft']*(1 + 0.6*(edges_df['true_flow']/edges_df['capacity'])**4)*1.2
+    edges_df['t_avg'] = edges_df['fft']
+
     update_df = edges_df.loc[edges_df['t_avg'] != edges_df['previous_t']].copy().reset_index()
 
     if update_df.shape[0] == 0:
@@ -155,6 +179,7 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
     ### Read the OD table of this time step
 
     t_OD_0 = time.time()
+
     ### Change OD list from using osmid to sequential id. It is easier to find the shortest path based on sequential index.
     if chunk:
         od_list = []
@@ -163,9 +188,7 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
             od_list.append(sub_od)
         OD = pd.concat(od_list, ignore_index=True)
     else:
-        OD = pd.read_csv(absolute_path+'{}/demand_inputs/OD_scag_5pct.csv'.format(project_folder))
-    OD = pd.merge(OD, nodes_df[['node_osmid', 'node_id_igraph']], how='left', left_on='O', right_on='node_osmid')
-    OD = pd.merge(OD, nodes_df[['node_osmid', 'node_id_igraph']], how='left', left_on='D', right_on='node_osmid', suffixes=['_O', '_D'])
+        OD = pd.read_csv(absolute_path+'{}/demand_inputs/random_od_1000.csv'.format(project_folder))
     OD['origin_sp'] = OD['node_id_igraph_O'] + 1 ### the node id in module sp is 1 higher than igraph id
     OD['destin_sp'] = OD['node_id_igraph_D'] + 1
     if 'agent_id' not in OD.columns:
@@ -173,19 +196,18 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
     if 'hour' not in OD.columns:
         OD['hour'] = 0
     OD = OD[['agent_id', 'origin_sp', 'destin_sp', 'hour']]
-    #OD = OD.iloc[0:1000000]
-    OD = OD.sample(frac=0.7)
+    OD = OD.iloc[0:5000]
 
     t_OD_1 = time.time()
     print('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
+
     return OD
 
 def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_id=None, project_folder=None):
 
     ### Aggregate and calculate link-level variables after all increments
-    edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(output_path+'{}/outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
-    # edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
-    edges_df.loc[edges_df['true_vol']>0, ['edge_id_igraph', 'type', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
+    # edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
+    edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
 
 def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project_folder=None, od_chunk=False):
 
@@ -198,19 +220,17 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
     global edges_df ### link weights
 
     ### Read in the edge attribute for volume delay calculation later
-    edges_df0 = pd.read_csv(absolute_path+'{}/network_inputs/osm_edges_scag.csv'.format(project_folder))
-    nodes_df = pd.read_csv(absolute_path+'{}/network_inputs/osm_nodes_scag.csv'.format(project_folder))
+    edges_df0 = pd.read_csv(absolute_path+'{}/network_inputs/osm_edges.csv'.format(project_folder))
+    nodes_df = pd.read_csv(absolute_path+'{}/network_inputs/osm_nodes.csv'.format(project_folder))
     
     ### damage
     if damage_df is None:
         pass
     else:
-        ### each damaged osmid could have more than one edge_id_igraph
-        damage_df = damage_df.merge(edges_df0[['edge_osmid', 'edge_id_igraph']], how='left', on='edge_osmid')
         edges_df0.loc[edges_df0['edge_id_igraph'].isin(damage_df['edge_id_igraph']), 'fft'] = 10e7
 
     node_count = max(len(np.unique(edges_df0['start_igraph'])), len(np.unique(edges_df0['end_igraph'])))
-    g_coo = ssparse.coo_matrix((edges_df0['fft']*1.2, (edges_df0['start_igraph'], edges_df0['end_igraph'])), shape=(node_count, node_count))
+    g_coo = ssparse.coo_matrix((edges_df0['fft'], (edges_df0['start_igraph'], edges_df0['end_igraph'])), shape=(node_count, node_count))
     edges_df0 = edges_df0[['edge_id_igraph', 'start_sp', 'end_sp', 'length', 'capacity', 'fft', 'type']]
     sio.mmwrite(absolute_path+'{}/simulation_outputs/network_sparse_scen{}_r{}.mtx'.format(project_folder, scen_id, random_seed), g_coo)
 
@@ -220,7 +240,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
     quarter_ps = [1/quarter_counts for i in range(quarter_counts)] ### probability of being in each division of hour
     quarter_ids = [i for i in range(quarter_counts)]
     
-    substep_counts = 50
+    substep_counts = 15
     substep_ps = [1/substep_counts for i in range(substep_counts)] ### probability of being in each substep
     substep_ids = [i for i in range(substep_counts)]
     print('{} quarters per hour, {} substeps'.format(quarter_counts, substep_counts))
@@ -242,10 +262,10 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
         ### Variables reset at the beginning of each day
         edges_df = edges_df0.copy() ### length, capacity and fft that should never change in one simulation
         edges_df['previous_t'] = edges_df['fft'] ### Used to find which edge to update. At the beginning of each day, previous_t is the free flow time.
-        # edges_df['tot_vol'] = 0
+        edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
-        for hour in range(6,27):
+        for hour in range(0,2):
 
             t_hour_0 = time.time()
 
@@ -312,9 +332,9 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
                     t_substep_1 = time.time()
                     print('DY{}_HR{} SS {}: {} sec, {} OD pairs'.format(day, hour, ss_id, t_substep_1-t_substep_0, OD_ss.shape[0], ))
 
-                output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
+                # output_edges_df(edges_df, day, hour, quarter, random_seed=random_seed, scen_id=scen_id, project_folder=project_folder)
 
-                ### stats
+                ### Update carry over flow
                 sta_stats.append([
                     random_seed, day, hour, quarter, quarter_demand, residual_demand, len(residual_OD_list),
                     np.sum(edges_df['t_avg']*edges_df['true_vol']/(quarter_demand*60)),
@@ -323,7 +343,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
                     ])
                 
                 ### Travel time by road category
-                # edges_df['tot_t_hr{}_qt{}'.format(hour, quarter)] = np.round(edges_df['true_vol'] * edges_df['t_avg'], 2)
+                edges_df['tot_t_hr{}_qt{}'.format(hour, quarter)] = edges_df['true_vol'] * edges_df['t_avg']
 
                 t_hour_1 = time.time()
                 ### log hour results before resetting the flow for the next time step
@@ -340,8 +360,8 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
 
 def main(random_seed=0, scen_id='base', damage_df=None, quarter_counts=4, project_folder='', od_chunk=False):
 
-    random_seed = int(os.environ['RANDOM_SEED'])
-    scen_id = os.environ['SCEN_ID']
+    # random_seed = 0#int(os.environ['RANDOM_SEED'])
+    # scen_id = 2#int(os.environ['SCEN_ID'])
     print('random_seed', random_seed, 'scen_id', scen_id)
 
     ### carry out sta/semi-dynamic assignment
@@ -352,17 +372,14 @@ def main(random_seed=0, scen_id='base', damage_df=None, quarter_counts=4, projec
 
     ### origanize results
     sta_stats_df = pd.DataFrame(sta_stats, columns=['random_seed', 'day', 'hour', 'quarter', 'quarter_demand', 'residual_demand', 'residual_demand_produced', 'avg_veh_min', 'avg_veh_km', 'avg_top10_vol'])
-    sta_stats_df.to_csv(absolute_path+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_id), index=False)
+    # sta_stats_df.to_csv(absolute_path+project_folder+'/simulation_outputs/stats/stats_scen{}.csv'.format(scen_id), index=False)
     print('total travel hours', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_min'])/60)
     print('total travel km', np.sum(sta_stats_df['quarter_demand']*sta_stats_df['avg_veh_km']))
 
 
 if __name__ == '__main__':
     project_folder = '/projects/los_angeles'
+    main(random_seed=0, scen_id='1000', damage_df=None, quarter_counts=4, project_folder=project_folder, od_chunk=False)
 
-    damage_df0 = pd.read_csv(absolute_path+'{}/network_inputs/bridge_closure/bridge_closure_day90.csv'.format(project_folder))
-    damage_links = damage_df0['OSMWayID1'].values.tolist() + damage_df0.dropna(subset=['OSMWayID2'])['OSMWayID2'].values.tolist()
-    damage_df = pd.DataFrame({'edge_osmid': damage_links})
-
-    main(random_seed=0, scen_id='scag_5pct_bc0_test', damage_df=None, quarter_counts=4, project_folder=project_folder, od_chunk=False)
+    # program has changed to compare with MPI, fft no 1.2, OD input only one file (tokyo_demand_0.csv), OD counts 5k, no update, edges_df['t_avg'] = edges_df['fft'], only output edges with tot_vol > 0
 
