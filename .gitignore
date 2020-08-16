@@ -8,6 +8,8 @@
 !*.py
 !*.ipynb
 !*.md
+!*.sh
+!*.yml
 
 # Ignore
 *.ipynb_checkpoints*
