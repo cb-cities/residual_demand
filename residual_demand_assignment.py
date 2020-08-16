@@ -20,6 +20,7 @@ pd.set_option('display.max_columns', 10)
 sys.setrecursionlimit(2000)
 
 absolute_path = os.path.dirname(os.path.abspath(__file__))
+output_path = '/global/scratch/bz247/residual_demand'
 sys.path.insert(0, absolute_path+'/../')
 sys.path.insert(0, '/home/bingyu/')
 from sp import interface 
@@ -86,7 +87,7 @@ def map_reduce_edge_flow(day, hour, quarter, ss_id, quarter_counts):
         return pd.DataFrame([], columns=['start_sp', 'end_sp', 'ss_vol']), [], [], 0
 
     ### Build a pool
-    process_count = 35
+    process_count = 23
     pool = Pool(processes=process_count, maxtasksperchild=1000)
 
     ### Find shortest pathes
@@ -172,7 +173,8 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
     if 'hour' not in OD.columns:
         OD['hour'] = 0
     OD = OD[['agent_id', 'origin_sp', 'destin_sp', 'hour']]
-    # OD = OD.iloc[0:100000]
+    #OD = OD.iloc[0:1000000]
+    OD = OD.sample(frac=0.7)
 
     t_OD_1 = time.time()
     print('{} sec to read {} OD pairs'.format(t_OD_1-t_OD_0, OD.shape[0]))
@@ -181,6 +183,7 @@ def read_OD(nodes_df=None, project_folder=None, chunk=False):
 def output_edges_df(edges_df, day, hour, quarter, random_seed=None, scen_id=None, project_folder=None):
 
     ### Aggregate and calculate link-level variables after all increments
+    edges_df[['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].to_csv(output_path+'{}/outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
     # edges_df.loc[edges_df['tot_vol']>0, ['edge_id_igraph', 'type', 'tot_vol', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
     edges_df.loc[edges_df['true_vol']>0, ['edge_id_igraph', 'type', 'true_vol', 't_avg']].round({'t_avg': 2}).to_csv(absolute_path+'{}/simulation_outputs/edges_df/edges_df_scen{}_r{}_DY{}_HR{}_QT{}.csv'.format(project_folder, scen_id, random_seed, day, hour, quarter), index=False)
 
@@ -217,7 +220,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
     quarter_ps = [1/quarter_counts for i in range(quarter_counts)] ### probability of being in each division of hour
     quarter_ids = [i for i in range(quarter_counts)]
     
-    substep_counts = 15
+    substep_counts = 50
     substep_ps = [1/substep_counts for i in range(substep_counts)] ### probability of being in each substep
     substep_ids = [i for i in range(substep_counts)]
     print('{} quarters per hour, {} substeps'.format(quarter_counts, substep_counts))
@@ -242,7 +245,7 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
         # edges_df['tot_vol'] = 0
         tot_non_arrival = 0
 
-        for hour in range(0,5):
+        for hour in range(6,27):
 
             t_hour_0 = time.time()
 
@@ -337,8 +340,8 @@ def sta(random_seed=0, quarter_counts=4, scen_id='base', damage_df=None, project
 
 def main(random_seed=0, scen_id='base', damage_df=None, quarter_counts=4, project_folder='', od_chunk=False):
 
-    # random_seed = 0#int(os.environ['RANDOM_SEED'])
-    # scen_id = 2#int(os.environ['SCEN_ID'])
+    random_seed = int(os.environ['RANDOM_SEED'])
+    scen_id = os.environ['SCEN_ID']
     print('random_seed', random_seed, 'scen_id', scen_id)
 
     ### carry out sta/semi-dynamic assignment
