@@ -6,6 +6,11 @@ import random
 import logging
 import numpy as np
 import pandas as pd
+import geopandas as gpd
+import contextily as ctx
+from shapely.wkt import loads
+import matplotlib.pyplot as plt 
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 if sys.version_info[1]==8:
     import pandana.network as pdna
@@ -151,7 +156,7 @@ def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarte
     logging.info('   # path {}'.format(path_i))
     # od_residual_ss = pd.DataFrame(od_residual_ss_list, columns=['agent_id', 'node_id_igraph_O', 'node_id_igraph_D'])
     
-    new_edges_df = weighted_edges_df[['start_igraph', 'end_igraph', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot']].copy()
+    new_edges_df = weighted_edges_df[['start_igraph', 'end_igraph', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot', 'geometry']].copy()
     new_edges_df = new_edges_df.join(all_path_vol_df, how='left')
     new_edges_df['vol_ss'] = new_edges_df['vol_ss'].fillna(0)
     new_edges_df['vol_true'] += new_edges_df['vol_ss']
@@ -185,10 +190,24 @@ def write_edge_vol(edges_df=None, simulation_outputs=None, quarter=None, hour=No
     if 'flow' in edges_df.columns:
         edges_df.loc[edges_df['vol_true']>0, ['start_igraph', 'end_igraph', 'vol_true', 'flow', 't_avg']].to_csv(scratch_dir+simulation_outputs+'/edge_vol/edge_vol_hr{}_qt{}_{}.csv'.format(hour, quarter, scen_nm), index=False)
 
+def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=None, scen_nm=None):
+    
+    if 'flow' in edges_df.columns:
+        fig, ax = plt.subplots(1,1, figsize=(20,20))
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.1)
+        edges_df[edges_df['flow']>5].to_crs(epsg=3857).plot(column='flow', lw=0.5, ax=ax, cax=cax, cmap='magma_r', legend=True, vmin=5, vmax=500)
+        ctx.add_basemap(ax, source=ctx.providers.Stamen.TonerLite, alpha=0.2)
+        fig.patch.set_facecolor('white')
+        fig.patch.set_alpha(0.7)
+        ax.set_title('Traffic flow (veh/hr) at {:02d}:{:02d}'.format(hour, quarter*15), font={'size': 30})
+        plt.savefig('projects/tokyo_residential_above/visualization_outputs/flow_map_hr{}_qt{}_{}.png'.format(hour, quarter, scen_nm), transparent=False)
+
 def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network_file_nodes=None, network_file_edges=None, demand_files=None, simulation_outputs=None, scen_nm=None, hour_list=None, quarter_list=None, cost_factor=None):
 
     ### network processing
     edges_df = pd.read_csv( work_dir + network_file_edges )
+    edges_df = gpd.GeoDataFrame(edges_df, crs='epsg:4326', geometry=edges_df['geometry'].map(loads))
     edges_df = edges_df.sort_values(by='fft', ascending=False).drop_duplicates(subset=['start_igraph', 'end_igraph'], keep='first')
     edges_df['edge_str'] = edges_df['start_igraph'].astype('str') + '-' + edges_df['end_igraph'].astype('str')
     edges_df['capacity'] = np.where(edges_df['capacity']<1, 1900, edges_df['capacity'])
@@ -204,10 +223,6 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
     ### probability of being in each division of hour
     quarter_ps = [1/quarter_counts for i in range(quarter_counts)]
     quarter_ids = [i for i in range(quarter_counts)]
-    ### probability of being in each substep
-    # substep_ps = [1/substep_counts for i in range(substep_counts)] 
-    # substep_ids = [i for i in range(substep_counts)]
-    # print('{} quarters per hour, {} substeps'.format(quarter_counts, substep_counts))
 
     ### initial setup
     edges_df['t_avg'] = edges_df['fft'] * 1.2
@@ -272,8 +287,9 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
                     logging.info('HR {} QT {} SS {} finished, max vol {}, max hwy vol {}, time {}'.format(hour, quarter, ss_id, np.max(edges_df['vol_true']), np.max(edges_df.loc[edges_df['is_highway']==1, 'vol_true']), time.time()-time_ss_0))
                 
                 ### write quarterly results
-                write_edge_vol(edges_df=edges_df, simulation_outputs=simulation_outputs, quarter=quarter, hour=hour, scen_nm=scen_nm)
-                # print(edges_df.nlargest(5, 'vol_true'))
+                if hour >=16 or (hour==15 and quarter==3):
+                    write_edge_vol(edges_df=edges_df, simulation_outputs=simulation_outputs, quarter=quarter, hour=hour, scen_nm=scen_nm)
+                    plot_edge_flow(edges_df=edges_df, simulation_outputs=simulation_outputs, quarter=quarter, hour=hour, scen_nm=scen_nm)
 
 def main(hour_list=None, quarter_list=None, scen_nm=None, cost_factor=None):
     ### input files
@@ -299,6 +315,6 @@ def main(hour_list=None, quarter_list=None, scen_nm=None, cost_factor=None):
     return True
 
 if __name__ == "__main__":
-    status = main(hour_list=[3], quarter_list=[0,1,2,3], scen_nm='ch_full', cost_factor=-2)
+    status = main(hour_list=list(range(16, 23)), quarter_list=[0,1,2,3], scen_nm='ch_full', cost_factor=-2)
     # for cost_factor in [-2, -1, -0.5, 0, 0.5]:
     #     status = main(hour_list=[3,4,5,6,7,8,9,10,11,12], quarter_list=[0,1,2,3], scen_nm='costfct{}'.format(cost_factor), cost_factor=cost_factor)
