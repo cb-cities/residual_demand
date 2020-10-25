@@ -322,6 +322,6 @@ def main(hour_list=None, quarter_list=None, scen_nm=None, cost_factor=None):
     return True
 
 if __name__ == "__main__":
-    status = main(hour_list=list(range(3, 10)), quarter_list=[0,1,2,3], scen_nm='', cost_factor=-2)
+    status = main(hour_list=list(range(3, 4)), quarter_list=[0,1,2,3], scen_nm='', cost_factor=-2)
     # for cost_factor in [-2, -1, -0.5, 0, 0.5]:
     #     status = main(hour_list=[3,4,5,6,7,8,9,10,11,12], quarter_list=[0,1,2,3], scen_nm='costfct{}'.format(cost_factor), cost_factor=cost_factor)
