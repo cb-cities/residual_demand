@@ -146,7 +146,12 @@ def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarte
                 all_path_vol[edge_str] += 1
             except KeyError:
                 all_path_vol[edge_str] = 1
-            p_dist += edge_travel_time_dict[edge_str]
+            try:
+                p_dist += edge_travel_time_dict[edge_str]
+            except KeyError:
+                print(edge_str)
+                print([pi for pi in p])
+                sys.exit(0)
             if p_dist > 3600/quarter_counts:
                 od_residual_ss_list.append([agent_ids[path_i], edge_e, p[-1]])
                 break
@@ -196,12 +201,13 @@ def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=No
         fig, ax = plt.subplots(1,1, figsize=(20,20))
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
-        edges_df[edges_df['flow']>5].to_crs(epsg=3857).plot(column='flow', lw=0.5, ax=ax, cax=cax, cmap='magma_r', legend=True, vmin=5, vmax=500)
+        # edges_df[edges_df['flow']>5].to_crs(epsg=3857).plot(column='flow', lw=0.5, ax=ax, cax=cax, cmap='magma_r', legend=True, vmin=5, vmax=500)
+        edges_df[edges_df['flow']>0].to_crs(epsg=3857).plot(column='flow', lw=0.5, ax=ax, cax=cax, cmap='magma_r', legend=True, vmin=10, vmax=100)
         ctx.add_basemap(ax, source=ctx.providers.Stamen.TonerLite, alpha=0.2)
         fig.patch.set_facecolor('white')
         fig.patch.set_alpha(0.7)
         ax.set_title('Traffic flow (veh/hr) at {:02d}:{:02d}'.format(hour, quarter*15), font={'size': 30})
-        plt.savefig('projects/tokyo_residential_above/visualization_outputs/flow_map_hr{}_qt{}_{}.png'.format(hour, quarter, scen_nm), transparent=False)
+        plt.savefig(scratch_dir+simulation_outputs+'/../visualization_outputs/flow_map_hr{}_qt{}_{}.png'.format(hour, quarter, scen_nm), transparent=False)
 
 def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network_file_nodes=None, network_file_edges=None, demand_files=None, simulation_outputs=None, scen_nm=None, hour_list=None, quarter_list=None, cost_factor=None):
 
@@ -211,7 +217,8 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
     edges_df = edges_df.sort_values(by='fft', ascending=False).drop_duplicates(subset=['start_igraph', 'end_igraph'], keep='first')
     edges_df['edge_str'] = edges_df['start_igraph'].astype('str') + '-' + edges_df['end_igraph'].astype('str')
     edges_df['capacity'] = np.where(edges_df['capacity']<1, 1900, edges_df['capacity'])
-    edges_df['is_highway'] = np.where(edges_df['type'].isin(['motorway', 'motorway_link']), 1, 0)
+    # edges_df['is_highway'] = np.where(edges_df['type'].isin(['motorway', 'motorway_link']), 1, 0)
+    edges_df['is_highway'] = np.where(edges_df['type'].isin([1, 2]), 1, 0)
     edges_df = edges_df.set_index('edge_str')
 
     nodes_df = pd.read_csv( work_dir + network_file_nodes )
@@ -287,25 +294,25 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
                     logging.info('HR {} QT {} SS {} finished, max vol {}, max hwy vol {}, time {}'.format(hour, quarter, ss_id, np.max(edges_df['vol_true']), np.max(edges_df.loc[edges_df['is_highway']==1, 'vol_true']), time.time()-time_ss_0))
                 
                 ### write quarterly results
-                if hour >=16 or (hour==15 and quarter==3):
+                if True: # hour >=16 or (hour==15 and quarter==3):
                     write_edge_vol(edges_df=edges_df, simulation_outputs=simulation_outputs, quarter=quarter, hour=hour, scen_nm=scen_nm)
                     plot_edge_flow(edges_df=edges_df, simulation_outputs=simulation_outputs, quarter=quarter, hour=hour, scen_nm=scen_nm)
 
 def main(hour_list=None, quarter_list=None, scen_nm=None, cost_factor=None):
     ### input files
-    network_file_edges = '/projects/tokyo_residential_above/network_inputs/edges_residual_demand.csv'
+    network_file_edges = '/projects/tokyo_sumitomo_shp/network_inputs/links.csv'
     # network_file_edges = '/projects/tokyo_residential_above/network_inputs/tokyo_edges_discount.csv'
-    network_file_nodes = '/projects/tokyo_residential_above/network_inputs/nodes_residual_demand.csv'
-    demand_files = ["/projects/tokyo_residential_above/demand_inputs/od_residual_demand_0.csv",
-                    "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_1.csv",
-                    "/projects/tokyo_residential_above/demand_inputs/od_residual_demand_2.csv"]
-    simulation_outputs = '/projects/tokyo_residential_above/simulation_outputs'
+    network_file_nodes = '/projects/tokyo_sumitomo_shp/network_inputs/nodes.csv'
+    demand_files = ["/projects/tokyo_sumitomo_shp/demand_inputs/od_0.csv",
+                    "/projects/tokyo_sumitomo_shp/demand_inputs/od_1.csv",
+                    "/projects/tokyo_sumitomo_shp/demand_inputs/od_2.csv"]
+    simulation_outputs = '/projects/tokyo_sumitomo_shp/simulation_outputs'
 
     ### log file
     if sys.version_info[1]==8:
-        logging.basicConfig(filename=scratch_dir+simulation_outputs+'/log/pandana_{}.log'.format(scen_nm), level=logging.INFO, force=True)
+        logging.basicConfig(filename=scratch_dir+simulation_outputs+'/log/{}.log'.format(scen_nm), level=logging.INFO, force=True)
     elif sys.version_info[1]<8:
-        logging.basicConfig(filename=scratch_dir+simulation_outputs+'/log/pandana_{}.log'.format(scen_nm), level=logging.INFO)
+        logging.basicConfig(filename=scratch_dir+simulation_outputs+'/log/{}.log'.format(scen_nm), level=logging.INFO)
     else:
         print('newer version than 3.8')
     
@@ -315,6 +322,6 @@ def main(hour_list=None, quarter_list=None, scen_nm=None, cost_factor=None):
     return True
 
 if __name__ == "__main__":
-    status = main(hour_list=list(range(16, 23)), quarter_list=[0,1,2,3], scen_nm='ch_full', cost_factor=-2)
+    status = main(hour_list=list(range(3, 10)), quarter_list=[0,1,2,3], scen_nm='', cost_factor=-2)
     # for cost_factor in [-2, -1, -0.5, 0, 0.5]:
     #     status = main(hour_list=[3,4,5,6,7,8,9,10,11,12], quarter_list=[0,1,2,3], scen_nm='costfct{}'.format(cost_factor), cost_factor=cost_factor)
