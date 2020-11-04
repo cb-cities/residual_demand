@@ -35,15 +35,15 @@ def map_edge_flow_residual(arg):
     row = arg[0]
     quarter_counts = arg[1]
     agent_id = int(od_ss_global['agent_id'].iloc[row])
-    origin_ID = int(od_ss_global['node_id_igraph_O'].iloc[row])
-    destin_ID = int(od_ss_global['node_id_igraph_D'].iloc[row])
+    origin_ID = int(od_ss_global['node_id_O'].iloc[row])
+    destin_ID = int(od_ss_global['node_id_D'].iloc[row])
 
     sp = g.dijkstra(origin_ID, destin_ID) ### g_0 is the network with imperfect information for route planning
     sp_dist = sp.distance(destin_ID) ### agent believed travel time with imperfect information
     
     if sp_dist > 10e7:
         sp.clear()
-        return {'agent_id': agent_id, 'origin_igraph': origin_ID, 'destin_igraph': destin_ID, 'route': [], 'arr': 'n'} ### empty path; not reach destination; travel time 0
+        return {'agent_id': agent_id, 'origin_node_id': origin_ID, 'destin_node_id': destin_ID, 'route': [], 'arr': 'n'} ### empty path; not reach destination; travel time 0
     else:
         sp_route = sp.route(destin_ID) ### agent route planned with imperfect information
         sp_route_trunc = []
@@ -58,7 +58,7 @@ def map_edge_flow_residual(arg):
                 break
         sp.clear()
 
-        return {'agent_id': agent_id, 'origin_igraph': origin_ID, 'destin_igraph': destin_ID, 'stop_at': stop_node, 'travel_time': p_dist, 'route': sp_route_trunc, 'arr': 'a'}
+        return {'agent_id': agent_id, 'origin_node_id': origin_ID, 'destin_node_id': destin_ID, 'stop_at': stop_node, 'travel_time': p_dist, 'route': sp_route_trunc, 'arr': 'a'}
 
 def reduce_edge_flow_pd(agent_info_routes_found):
     ### Reduce (count the total traffic flow per edge) with pandas groupby
@@ -73,7 +73,7 @@ def reduce_edge_flow_pd(agent_info_routes_found):
 
 def substep_assignment_sp(nodes_df=None, weighted_edges_df=None, od_ss=None, quarter_demand=None, assigned_demand=None, quarter_counts=4):
     global g, edge_travel_time_dict, od_ss_global
-    g = interface.from_dataframe(weighted_edges_df, 'start_igraph', 'end_igraph', 'weight')
+    g = interface.from_dataframe(weighted_edges_df, 'start_node_id', 'end_node_id', 'weight')
     edge_travel_time_dict = weighted_edges_df['t_avg'].T.to_dict()
     od_ss_global = od_ss.copy()
 
@@ -104,12 +104,12 @@ def substep_assignment_sp(nodes_df=None, weighted_edges_df=None, od_ss=None, qua
 
         edge_volume = reduce_edge_flow_pd(agent_info_routes_found)
         
-        ss_residual_OD_list = [(r['agent_id'], r['stop_at'], r['destin_igraph']) for r in agent_info_routes_found if r['stop_at']!=r['destin_igraph']]
+        ss_residual_OD_list = [(r['agent_id'], r['stop_at'], r['destin_node_id']) for r in agent_info_routes_found if r['stop_at']!=r['destin_node_id']]
         #ss_travel_time_list = [(r['agent_id'], day, hour, quarter, ss_id, r['travel_time']) for r in agent_info_routes]
         # print('ss {}, total od {}, found {}, not found {}'.format(ss_id, unique_origin, len(agent_info_routes_found), len(agent_info_routes_notfound)))
         # print('DY{}_HR{}_QT{} SS {}: {} O --> {} D found, dijkstra pool {} sec on {} processes'.format(day, hour, quarter, ss_id, unique_origin, len(agent_info_routes_found), t_odsp_1 - t_odsp_0, process_count))
 
-    new_edges_df = weighted_edges_df[['start_igraph', 'end_igraph', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot']].copy()
+    new_edges_df = weighted_edges_df[['start_node_id', 'end_node_id', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot']].copy()
     new_edges_df = new_edges_df.join(edge_volume, how='left')
     new_edges_df['vol_ss'] = new_edges_df['vol_ss'].fillna(0)
     new_edges_df['vol_true'] += new_edges_df['vol_ss']
@@ -120,17 +120,16 @@ def substep_assignment_sp(nodes_df=None, weighted_edges_df=None, od_ss=None, qua
 
     return new_edges_df, ss_residual_OD_list
     
-
 def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarter_demand=None, assigned_demand=None, quarter_counts=4):
 
     # print(nodes_df.shape, edges_df.shape)
     # print(len(np.unique(nodes_df.index)), len(np.unique(edges_df.index)))
     # sys.exit(0)
-    net = pdna.Network(nodes_df["lon"], nodes_df["lat"], weighted_edges_df["start_igraph"], weighted_edges_df["end_igraph"], weighted_edges_df[["weight"]], twoway=False)
+    net = pdna.Network(nodes_df["lon"], nodes_df["lat"], weighted_edges_df["start_node_id"], weighted_edges_df["end_node_id"], weighted_edges_df[["weight"]], twoway=False)
     net.set(pd.Series(net.node_ids))
 
-    nodes_origin = od_ss['node_id_igraph_O'].values
-    nodes_destin = od_ss['node_id_igraph_D'].values
+    nodes_origin = od_ss['node_id_O'].values
+    nodes_destin = od_ss['node_id_D'].values
     agent_ids = od_ss['agent_id'].values
     paths = net.shortest_paths(nodes_origin, nodes_destin)
 
@@ -161,7 +160,7 @@ def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarte
     logging.info('   # path {}'.format(path_i))
     # od_residual_ss = pd.DataFrame(od_residual_ss_list, columns=['agent_id', 'node_id_igraph_O', 'node_id_igraph_D'])
     
-    new_edges_df = weighted_edges_df[['start_igraph', 'end_igraph', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot', 'geometry']].copy()
+    new_edges_df = weighted_edges_df[['start_node_id', 'end_node_id', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot', 'geometry']].copy()
     new_edges_df = new_edges_df.join(all_path_vol_df, how='left')
     new_edges_df['vol_ss'] = new_edges_df['vol_ss'].fillna(0)
     new_edges_df['vol_true'] += new_edges_df['vol_ss']
@@ -183,7 +182,10 @@ def read_od(demand_files=None):
         od_list.append(od_chunk)
     
     od_all = pd.concat(od_list, ignore_index=True)
-    od_all = od_all[['agent_id', 'node_id_igraph_O', 'node_id_igraph_D', 'hour']]
+    od_all['node_id_O'] = od_all['O']
+    od_all['node_id_D'] = od_all['D']
+    od_all['hour'] = od_all['trip_hour']
+    od_all = od_all[['agent_id', 'node_id_O', 'node_id_D', 'hour']]
     # od_all = od_all.iloc[0:10000000]
 
     t_od_1 = time.time()
@@ -193,7 +195,7 @@ def read_od(demand_files=None):
 def write_edge_vol(edges_df=None, simulation_outputs=None, quarter=None, hour=None, scen_nm=None):
 
     if 'flow' in edges_df.columns:
-        edges_df.loc[edges_df['vol_true']>0, ['start_igraph', 'end_igraph', 'vol_true', 'flow', 't_avg']].to_csv(scratch_dir+simulation_outputs+'/edge_vol/edge_vol_hr{}_qt{}_{}.csv'.format(hour, quarter, scen_nm), index=False)
+        edges_df.loc[edges_df['vol_true']>0, ['start_node_id', 'end_node_id', 'vol_true', 'flow', 't_avg']].to_csv(scratch_dir+simulation_outputs+'/edge_vol/edge_vol_hr{}_qt{}_{}.csv'.format(hour, quarter, scen_nm), index=False)
 
 def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=None, scen_nm=None):
     
@@ -202,7 +204,7 @@ def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=No
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
         # edges_df[edges_df['flow']>5].to_crs(epsg=3857).plot(column='flow', lw=0.5, ax=ax, cax=cax, cmap='magma_r', legend=True, vmin=5, vmax=500)
-        edges_df[edges_df['flow']>0].to_crs(epsg=3857).plot(column='flow', lw=0.5, ax=ax, cax=cax, cmap='magma_r', legend=True, vmin=10, vmax=100)
+        edges_df[edges_df['flow']>0].to_crs(epsg=3857).plot(column='flow', lw=0.5, ax=ax, cax=cax, cmap='magma_r', legend=True, vmin=10, vmax=200)
         ctx.add_basemap(ax, source=ctx.providers.Stamen.TonerLite, alpha=0.2)
         fig.patch.set_facecolor('white')
         fig.patch.set_alpha(0.7)
@@ -214,15 +216,15 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
     ### network processing
     edges_df = pd.read_csv( work_dir + network_file_edges )
     edges_df = gpd.GeoDataFrame(edges_df, crs='epsg:4326', geometry=edges_df['geometry'].map(loads))
-    edges_df = edges_df.sort_values(by='fft', ascending=False).drop_duplicates(subset=['start_igraph', 'end_igraph'], keep='first')
-    edges_df['edge_str'] = edges_df['start_igraph'].astype('str') + '-' + edges_df['end_igraph'].astype('str')
-    edges_df['capacity'] = np.where(edges_df['capacity']<1, 1900, edges_df['capacity'])
+    edges_df = edges_df.sort_values(by='fft', ascending=False).drop_duplicates(subset=['start_node_id', 'end_node_id'], keep='first')
+    edges_df['edge_str'] = edges_df['start_node_id'].astype('str') + '-' + edges_df['end_node_id'].astype('str')
+    edges_df['capacity'] = np.where(edges_df['capacity']<1, 950, edges_df['capacity'])
     # edges_df['is_highway'] = np.where(edges_df['type'].isin(['motorway', 'motorway_link']), 1, 0)
-    edges_df['is_highway'] = np.where(edges_df['type'].isin([1, 2]), 1, 0)
+    edges_df['is_highway'] = np.where(edges_df['type'].isin(['motorway', 'motorway_link']), 1, 0)
     edges_df = edges_df.set_index('edge_str')
 
     nodes_df = pd.read_csv( work_dir + network_file_nodes )
-    nodes_df = nodes_df.set_index('node_id_igraph')
+    nodes_df = nodes_df.set_index('node_id')
 
     ### OD processing
     od_all = read_od(demand_files=demand_files)
@@ -244,7 +246,7 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
             ### Read OD
             od_hour = od_all[od_all['hour']==hour].copy()
             if od_hour.shape[0] == 0:
-                od_hour = pd.DataFrame([], columns=['agent_id', 'node_id_igraph_O', 'node_id_igraph_D', 'hour'])
+                od_hour = pd.DataFrame([], columns=['agent_id', 'node_id_O', 'node_id_D', 'hour'])
 
             ### Divide into quarters
             od_quarter_msk = np.random.choice(quarter_ids, size=od_hour.shape[0], p=quarter_ps)
@@ -255,13 +257,13 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
                 ### New OD in assignment period
                 od_quarter = od_hour[od_hour['quarter']==quarter]
                 ### Add resudal OD
-                od_residual = pd.DataFrame(od_residual_list, columns=['agent_id', 'node_id_igraph_O', 'node_id_igraph_D'])
+                od_residual = pd.DataFrame(od_residual_list, columns=['agent_id', 'node_id_O', 'node_id_D'])
                 od_residual['quarter'] = quarter
                 ### Total OD in each assignment period is the combined of new and residual OD
                 od_quarter = pd.concat([od_quarter, od_residual], sort=False, ignore_index=True)
                 ### Residual OD is no longer residual after it has been merged to the quarterly OD
                 od_residual_list = []
-                od_quarter = od_quarter[od_quarter['node_id_igraph_O'] != od_quarter['node_id_igraph_D']]
+                od_quarter = od_quarter[od_quarter['node_id_O'] != od_quarter['node_id_D']]
 
                 quarter_demand = od_quarter.shape[0] ### total demand for this quarter, including total and residual demand
                 residual_demand = od_residual.shape[0] ### how many among the OD pairs to be assigned in this quarter are actually residual from previous quarters
@@ -300,13 +302,13 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=100000, network
 
 def main(hour_list=None, quarter_list=None, scen_nm=None, cost_factor=None):
     ### input files
-    network_file_edges = '/projects/tokyo_sumitomo_shp/network_inputs/links.csv'
+    network_file_edges = '/projects/tokyo_osmnx/network_inputs/tokyo_edges.csv'
     # network_file_edges = '/projects/tokyo_residential_above/network_inputs/tokyo_edges_discount.csv'
-    network_file_nodes = '/projects/tokyo_sumitomo_shp/network_inputs/nodes.csv'
-    demand_files = ["/projects/tokyo_sumitomo_shp/demand_inputs/od_0.csv",
-                    "/projects/tokyo_sumitomo_shp/demand_inputs/od_1.csv",
-                    "/projects/tokyo_sumitomo_shp/demand_inputs/od_2.csv"]
-    simulation_outputs = '/projects/tokyo_sumitomo_shp/simulation_outputs'
+    network_file_nodes = '/projects/tokyo_osmnx/network_inputs/tokyo_nodes.csv'
+    demand_files = ["/projects/tokyo_osmnx/demand_inputs/od_0.csv",
+                    "/projects/tokyo_osmnx/demand_inputs/od_1.csv",
+                    "/projects/tokyo_osmnx/demand_inputs/od_2.csv"]
+    simulation_outputs = '/projects/tokyo_osmnx/simulation_outputs'
 
     ### log file
     if sys.version_info[1]==8:
@@ -322,6 +324,6 @@ def main(hour_list=None, quarter_list=None, scen_nm=None, cost_factor=None):
     return True
 
 if __name__ == "__main__":
-    status = main(hour_list=list(range(3, 4)), quarter_list=[0,1,2,3], scen_nm='', cost_factor=-2)
+    status = main(hour_list=list(range(3, 8)), quarter_list=[0,1,2,3], scen_nm='', cost_factor=0)
     # for cost_factor in [-2, -1, -0.5, 0, 0.5]:
     #     status = main(hour_list=[3,4,5,6,7,8,9,10,11,12], quarter_list=[0,1,2,3], scen_nm='costfct{}'.format(cost_factor), cost_factor=cost_factor)
