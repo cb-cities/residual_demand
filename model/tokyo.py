@@ -11,15 +11,17 @@ def main(hour_list=None, quarter_list=None):
 
     ### scen_name
     scen_nm = '2016_close'
-    home_dir = '/home/bingyu/Documents/residual_demand'
+    home_dir = '/home1/07427/bingyu/residual_demand'
+    work_dir = '/work/07427/bingyu/stampede2/residual_demand'
+    scratch_dir = '/scratch/07427/bingyu/residual_demand'
 
     ### input files
-    network_file_edges = home_dir + '/projects/tokyo_osmnx/network_inputs/tokyo_edges.csv'
-    network_file_nodes = home_dir + '/projects/tokyo_osmnx/network_inputs/tokyo_nodes.csv'
-    demand_files = [home_dir + "/projects/tokyo_osmnx/demand_inputs/od_0.csv",
-                    home_dir + "/projects/tokyo_osmnx/demand_inputs/od_1.csv",
-                    home_dir + "/projects/tokyo_osmnx/demand_inputs/od_2.csv"]
-    simulation_outputs = home_dir + '/projects/tokyo_osmnx/simulation_outputs'
+    network_file_edges = work_dir + '/projects/tokyo_osmnx/network_inputs/tokyo_edges.csv'
+    network_file_nodes = work_dir + '/projects/tokyo_osmnx/network_inputs/tokyo_nodes.csv'
+    demand_files = [work_dir + "/projects/tokyo_osmnx/demand_inputs/od_0.csv",
+                    work_dir + "/projects/tokyo_osmnx/demand_inputs/od_1.csv",
+                    work_dir + "/projects/tokyo_osmnx/demand_inputs/od_2.csv"]
+    simulation_outputs = scratch_dir + '/projects/tokyo_osmnx/simulation_outputs'
 
     ### log file*
     logging.basicConfig(filename=simulation_outputs+'/log/{}.log'.format(scen_nm), level=logging.INFO, force=True, filemode='w')
@@ -33,7 +35,7 @@ def main(hour_list=None, quarter_list=None):
     edges_df['is_highway'] = np.where(edges_df['type'].isin(['motorway', 'motorway_link']), 1, 0)
     edges_df = edges_df.set_index('edge_str')
     ### closures
-    closed_links = pd.read_csv(home_dir + '/projects/tokyo_osmnx/network_inputs/20160304_closed_links.csv')
+    closed_links = pd.read_csv(work_dir + '/projects/tokyo_osmnx/network_inputs/20160304_closed_links.csv')
     for row in closed_links.itertuples():
         edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'capacity'] = 1
         edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'fft'] = 36000
@@ -65,4 +67,4 @@ def main(hour_list=None, quarter_list=None):
     return True
 
 if __name__ == "__main__":
-    status = main(hour_list=list(range(13, 18)), quarter_list=[0,1,2,3])
+    status = main(hour_list=list(range(13, 14)), quarter_list=[0])

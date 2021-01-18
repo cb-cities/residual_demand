@@ -17,7 +17,7 @@ if sys.version_info[1]==8:
 
 from multiprocessing import Pool
 sys.path.insert(0, '/home/bingyu/Documents')
-from sp import interface
+# from sp import interface
 
 ### dir
 # home_dir = '/home/bingyu/Documents/residual_demand' # os.environ['HOME']+'/residual_demand'

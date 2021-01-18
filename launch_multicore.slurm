@@ -16,11 +16,11 @@ source $HOME/virtualenvs/cities/bin/activate
 export OMP_NUM_THREADS=40
 
 ### folder in $SCRATCH to hold output
-scratch_folder=$SCRATCH/residual_demand/projects/tokyo_residential_above/simulation_outputs
+scratch_folder=$SCRATCH/residual_demand/projects/tokyo_osmnx/simulation_outputs
 mkdir -p $scratch_folder
 mkdir -p $scratch_folder/log
-mkdir -p $scratch_folder/stats
-mkdir -p $scratch_folder/edges_df
+mkdir -p $scratch_folder/edge_vol
+mkdir -p $scratch_folder/trip_info
 
 # Launcher to use multicores on node
 export LAUNCHER_WORKDIR=$PWD
