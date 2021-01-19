@@ -124,7 +124,7 @@ def substep_assignment_sp(nodes_df=None, weighted_edges_df=None, od_ss=None, qua
         # print('ss {}, total od {}, found {}, not found {}'.format(ss_id, unique_origin, len(agent_info_routes_found), len(agent_info_routes_notfound)))
         # print('DY{}_HR{}_QT{} SS {}: {} O --> {} D found, dijkstra pool {} sec on {} processes'.format(day, hour, quarter, ss_id, unique_origin, len(agent_info_routes_found), t_odsp_1 - t_odsp_0, process_count))
 
-    new_edges_df = weighted_edges_df[['start_nid', 'end_nid', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot']].copy()
+    new_edges_df = weighted_edges_df[['start_nid', 'end_nid', 'fft', 'capacity', 'normal_fft', 'normal_capacity', 'length', 'is_highway', 'vol_true', 'vol_tot']].copy()
     new_edges_df = new_edges_df.join(edge_volume, how='left')
     new_edges_df['vol_ss'] = new_edges_df['vol_ss'].fillna(0)
     new_edges_df['vol_true'] += new_edges_df['vol_ss']
@@ -207,7 +207,7 @@ def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarte
 
     # edge_volume = pd.DataFrame(all_paths, columns=['edge_str']).groupby('edge_str').size().to_frame(name=['vol_ss'])
     
-    new_edges_df = weighted_edges_df[['start_nid', 'end_nid', 'fft', 'capacity', 'length', 'is_highway', 'vol_true', 'vol_tot', 'veh_current', 'geometry']].copy()
+    new_edges_df = weighted_edges_df[['start_nid', 'end_nid', 'fft', 'capacity', 'normal_fft', 'normal_capacity', 'length', 'is_highway', 'vol_true', 'vol_tot', 'veh_current', 'geometry']].copy()
     # new_edges_df = new_edges_df.join(edge_volume, how='left')
     # new_edges_df['vol_ss'] = new_edges_df['vol_ss'].fillna(0)
     # new_edges_df['vol_true'] += new_edges_df['vol_ss']
