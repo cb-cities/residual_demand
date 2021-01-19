@@ -65,4 +65,4 @@ def main(hour_list=None, quarter_list=None):
     return True
 
 if __name__ == "__main__":
-    status = main(hour_list=list(range(13, 18)), quarter_list=[0,1,2,3])
+    status = main(hour_list=list(range(13, 14)), quarter_list=[0,1,2,3])

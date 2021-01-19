@@ -135,6 +135,7 @@ def substep_assignment_sp(nodes_df=None, weighted_edges_df=None, od_ss=None, qua
 
     return new_edges_df, ss_residual_OD_list
     
+@profile
 def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarter_demand=None, assigned_demand=None, quarter_counts=4, trip_info=None):
 
     # print(nodes_df.shape, edges_df.shape)
@@ -270,6 +271,7 @@ def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=No
         ax.set_title('Traffic flow (veh/hr) at {:02d}:{:02d}'.format(hour, quarter*15), font={'size': 30})
         plt.savefig(simulation_outputs+'/../visualization_outputs/flow_map_hr{}_qt{}_{}.png'.format(hour, quarter, scen_nm), transparent=False)
 
+@profile
 def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_df=None, nodes_df=None, od_all=None, demand_files=None, simulation_outputs=None, scen_nm=None, hour_list=None, quarter_list=None, cost_factor=None):
 
     ### OD processing
