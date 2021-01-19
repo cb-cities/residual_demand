@@ -270,7 +270,7 @@ def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=No
         ax.set_title('Traffic flow (veh/hr) at {:02d}:{:02d}'.format(hour, quarter*15), font={'size': 30})
         plt.savefig(simulation_outputs+'/../visualization_outputs/flow_map_hr{}_qt{}_{}.png'.format(hour, quarter, scen_nm), transparent=False)
 
-def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_df=None, nodes_df=None, od_all=None, demand_files=None, simulation_outputs=None, scen_nm=None, hour_list=None, quarter_list=None, cost_factor=None):
+def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_df=None, nodes_df=None, od_all=None, demand_files=None, simulation_outputs=None, scen_nm=None, hour_list=None, quarter_list=None, cost_factor=None, closure_hours=[], closed_links=None):
 
     ### OD processing
     # od_all = read_od(demand_files=demand_files, nodes_df=nodes_df)
@@ -291,6 +291,13 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_d
     ### Loop through days and hours
     for day in ['na']:
         for hour in hour_list:
+            if hour in closure_hours:
+                for row in closed_links.itertuples():
+                    edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'capacity'] = 1
+                    edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'fft'] = 36000
+            else:
+                edges_df['capacity'] = edges_df['normal_capacity']
+                edges_df['fft'] = edges_df['normal_fft']
 
             ### Read OD
             od_hour = od_all[od_all['hour']==hour].copy()

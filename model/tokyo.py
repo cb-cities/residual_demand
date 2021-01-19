@@ -7,7 +7,7 @@ import geopandas as gpd
 from shapely.wkt import loads
 from residual_demand_assignment import assignment
 
-def main(hour_list=None, quarter_list=None):
+def main(hour_list=None, quarter_list=None, closure_hours=None):
 
     ### scen_name
     scen_nm = '2016_close'
@@ -33,12 +33,14 @@ def main(hour_list=None, quarter_list=None):
     edges_df['edge_str'] = edges_df['start_nid'].astype('str') + '-' + edges_df['end_nid'].astype('str')
     edges_df['capacity'] = np.where(edges_df['capacity']<1, 950, edges_df['capacity'])
     edges_df['is_highway'] = np.where(edges_df['type'].isin(['motorway', 'motorway_link']), 1, 0)
+    edges_df['normal_capacity'] = edges_df['capacity']
+    edges_df['normal_fft'] = edges_df['fft']
     edges_df = edges_df.set_index('edge_str')
     ### closures
     closed_links = pd.read_csv(work_dir + '/projects/tokyo_osmnx/network_inputs/20160304_closed_links.csv')
-    for row in closed_links.itertuples():
-        edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'capacity'] = 1
-        edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'fft'] = 36000
+    # for row in closed_links.itertuples():
+    #     edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'capacity'] = 1
+    #     edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'fft'] = 36000
     # print(edges_df.loc[edges_df['fft'] == 36000, ['u', 'v', 'capacity', 'fft']])
     # edges_df.loc[edges_df['fft'] == 36000, ['u', 'v', 'capacity', 'fft', 'geometry']].to_csv(simulation_outputs + '/closed_2016.csv')
     # sys.exit(0)
@@ -62,9 +64,9 @@ def main(hour_list=None, quarter_list=None):
     logging.info('{} sec to read {} OD pairs'.format(t_od_1-t_od_0, od_all.shape[0]))
     
     ### run residual_demand_assignment
-    assignment(edges_df=edges_df, nodes_df=nodes_df, od_all=od_all, simulation_outputs=simulation_outputs, scen_nm=scen_nm, hour_list=hour_list, quarter_list=quarter_list)
+    assignment(edges_df=edges_df, nodes_df=nodes_df, od_all=od_all, simulation_outputs=simulation_outputs, scen_nm=scen_nm, hour_list=hour_list, quarter_list=quarter_list, closure_hours=closure_hours, closed_links=closed_links)
 
     return True
 
 if __name__ == "__main__":
-    status = main(hour_list=list(range(13, 14)), quarter_list=[0])
+    status = main(hour_list=list(range(13, 18)), quarter_list=[0,1,2,3], closure_hours=[15,16])
