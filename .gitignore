@@ -10,6 +10,7 @@
 !*.md
 !*.sh
 !*.yml
+!images/*
 
 # Ignore
 *.ipynb_checkpoints*
