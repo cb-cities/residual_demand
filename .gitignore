@@ -12,5 +12,9 @@
 !*.yml
 !images/*
 
+# The example data
+!test/network_inputs/*
+!test/demand_inputs/*
+
 # Ignore
 *.ipynb_checkpoints*

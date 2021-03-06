@@ -24,7 +24,7 @@ def main(hour_list=None, quarter_list=None, closure_hours=None):
     demand_file = abs_path + '/../projects/test/demand_inputs/test_od.csv'
     simulation_outputs = abs_path + '/../projects/test/simulation_outputs'
 
-
+ 
     ############# NO CHANGE HERE ############# 
     ### log file
     logging.basicConfig(filename=simulation_outputs+'/log/{}.log'.format(scen_nm), level=logging.INFO, force=True, filemode='w')
