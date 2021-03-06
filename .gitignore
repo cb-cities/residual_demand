@@ -14,8 +14,8 @@
 !images/*
 
 # The example data
-!projects/test/network_inputs/*
-!projects/test/demand_inputs/*
+#!projects/test/network_inputs/*
+#!projects/test/demand_inputs/*
 
 # Ignore
 *.ipynb_checkpoints*
