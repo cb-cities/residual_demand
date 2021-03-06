@@ -1,6 +1,6 @@
 # Semi-dynamic traffic assignment with residual demand
 
-![Tokyo emission](images/tokyo_animation_emission.gif)
+![Tokyo emission](images/tokyo_animation_emission_crop.gif)
 
 ### Features
 * Quasi-equilibrium traffic assignment
