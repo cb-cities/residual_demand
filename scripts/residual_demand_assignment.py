@@ -1,28 +1,22 @@
 from __future__ import print_function
-import os.path
 import sys
 import time
 import random
 import logging
 import numpy as np
 import pandas as pd
-import geopandas as gpd
-import contextily as ctx
-from shapely.wkt import loads
+# import geopandas as gpd
+# import contextily as ctx
+# from shapely.wkt import loads
 import matplotlib.pyplot as plt 
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 if sys.version_info[1]==8:
     import pandana.network as pdna
 
+### parallelized shortest path
 from multiprocessing import Pool
-sys.path.insert(0, '/home/bingyu/Documents')
-# from sp import interface
-
-### dir
-# home_dir = '/home/bingyu/Documents/residual_demand' # os.environ['HOME']+'/residual_demand'
-# work_dir = '/home/bingyu/Documents/residual_demand' # os.environ['WORK']+'/residual_demand'
-# scratch_dir = '/home/bingyu/Documents/residual_demand' # os.environ['SCRATCH']+'/residual_demand'
+from sp import interface
 
 ### random seed
 random.seed(0)
@@ -152,10 +146,6 @@ def substep_assignment_sp(nodes_df=None, weighted_edges_df=None, od_ss=None, qua
 # @profile
 def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarter_demand=None, assigned_demand=None, quarter_counts=4, trip_info=None, agent_time_limit = None):
 
-    # print(nodes_df.shape, edges_df.shape)
-    # print(len(np.unique(nodes_df.index)), len(np.unique(edges_df.index)))
-    # sys.exit(0)
-    # print(weighted_edges_df['weight'].describe())
     # weighted_edges_df["weight"] = weighted_edges_df["length"]
     net = pdna.Network(nodes_df["x"], nodes_df["y"], weighted_edges_df["start_nid"], weighted_edges_df["end_nid"], weighted_edges_df[["weight"]], twoway=False)
     net.set(pd.Series(net.node_ids))
@@ -259,33 +249,6 @@ def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarte
     # sys.exit(0)
 
     return new_edges_df, od_residual_ss_list, trip_info
-
-def read_od(demand_files=None, nodes_df=None, is_osmid=True):
-    ### Read the OD table of this time step
-
-    t_od_0 = time.time()
-
-    od_list = []
-    for demand_file in demand_files:
-        od_chunk = pd.read_csv( demand_file )
-        od_list.append(od_chunk)
-    
-    od_all = pd.concat(od_list, ignore_index=True)
-    if is_osmid:
-        osmid2nid_dict = {getattr(n, 'osmid'): getattr(n, 'Index') for n in nodes_df.itertuples()}
-        od_all['origin_nid'] = od_all['O'].map(osmid2nid_dict)
-        od_all['destin_nid'] = od_all['D'].map(osmid2nid_dict)
-        # od_all['hour'] = od_all['trip_hour']
-        od_all['hour'] = np.random.choice([6,7,8,9], size=od_all.shape[0], p=[0.1, 0.4, 0.4, 0.1])
-    else:
-        od_all['origin_nid'] = od_all['O']
-        od_all['destin_nid'] = od_all['D']
-    od_all = od_all[['agent_id', 'origin_nid', 'destin_nid', 'hour']]
-    # od_all = od_all.iloc[-2771611:-1]
-
-    t_od_1 = time.time()
-    logging.info('{} sec to read {} OD pairs'.format(t_od_1-t_od_0, od_all.shape[0]))
-    return od_all
 
 def write_edge_vol(edges_df=None, simulation_outputs=None, quarter=None, hour=None, scen_nm=None):
 

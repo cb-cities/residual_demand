@@ -1,15 +1,22 @@
 # Semi-dynamic traffic assignment with residual demand
-* Trips that did not finish in the previous time step will be considered as residual demand and re-assigned in the next time step.
-* Assignment time interval can be as small as a few minutes to as big as a few hours. The larger the time interval, the lesser the residual trips.
 
-### Road network
-Since the assignment is still based on volume-delay functions (i.e., static), detailed road information (e.g., traffic signals, lanes, turn restrictions) is not needed. The code is based on [OSMnx](https://github.com/gboeing/osmnx) format. Other road geometry inputs need to be converted to this format.
+[Tokyo emission](images/tokyo_animation_emission.gif)
 
-### Demand
-The demand is specified by a CSV file, including at least the origin node colume and the destination node column (node index corresponds to the road network input). Optionally, departure hour can be given.
+### Features
+* Quasi-equilibrium traffic assignment
+* Efficient routing for millions of trips using [Contraction Hierarchy](https://github.com/UDST/pandana/blob/dev/examples/shortest_path_example.py) and priority-queue based Dijkstra algorithm [sp](https://github.com/cb-cities/sp)
+* Temporal dynamics with residual demand, with time step of a few minutes
+* Compatible with road network retrieved from [OSMnx](https://github.com/gboeing/osmnx)
 
-### Assignment with residual demand
-Trips are assigned to the instantaneous shortest path at the time of the assignment. The shortest path calculation uses the [sp](https://github.com/cb-cities/sp) package based on the Dijkstra's algorithm.
+### Use cases
+* Calculating network traffic flow for small and large road networks (10 to 1,000,000 links) at sub-hourly time steps
+* Visualizing traffic congestion dynamics throughout the day
+* Analyzing traffic-induced carbon emissions (emission factor model)
+* Assessing regional mobility and resilience with disruptions (e.g., road closure, seismic damages)
 
-### Outputs
-The outputs include the traffic volume in a particular assignment interval and the cumulative volume for each road link.
+### Getting started
+1. Clone the repository `git clone https://github.com/cb-cities/residual_demand.git`
+2. Create a new Python 3.8 virtual environment and install dependencies `conda env create -f environment.yml`
+3. Run the test example `python scripts/run_simulation_template.py`
+4. Examine the outputs in the [output data](projects/test/simulation_outputs) and [visualization](projects/test/visualization_outputs) folders
+5. Run for your own problem by following the test example

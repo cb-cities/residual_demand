@@ -1,0 +1,10 @@
+name: py38
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - geopandas=0.8.1=py_0
+  - matplotlib=3.3.1=1
+  - numpy=1.19.4=py38h18fd61f_2
+prefix: /home/bingyu/anaconda3/envs/py38
+
