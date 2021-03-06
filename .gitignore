@@ -5,6 +5,7 @@
 !*/
 
 !*.gitignore
+!*.gitattributes
 !*.py
 !*.ipynb
 !*.md
