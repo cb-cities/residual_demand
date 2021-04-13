@@ -1,4 +1,5 @@
 from __future__ import print_function
+import gc 
 import sys
 import time
 import random
@@ -144,7 +145,7 @@ def substep_assignment_sp(nodes_df=None, weighted_edges_df=None, od_ss=None, qua
     return new_edges_df, ss_residual_OD_list
     
 # @profile
-def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarter_demand=None, assigned_demand=None, quarter_counts=4, trip_info=None, agent_time_limit = None):
+def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarter_demand=None, assigned_demand=None, quarter_counts=4, trip_info=None, agent_time_limit = None, sample_interval=1):
 
     # weighted_edges_df["weight"] = weighted_edges_df["length"]
     net = pdna.Network(nodes_df["x"], nodes_df["y"], weighted_edges_df["start_nid"], weighted_edges_df["end_nid"], weighted_edges_df[["weight"]], twoway=False)
@@ -203,14 +204,14 @@ def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarte
                 # p_dist += edge_travel_time
                 remaining_time -= edge_travel_time
                 used_time += edge_travel_time
-                edge_quarter_vol[edge_str] += 1
+                edge_quarter_vol[edge_str] += (1 * sample_interval)
                 trip_stop = edge_e
                 if edge_str == agent_current_links[path_i]:
-                    edge_current_vehicles[edge_str] -= 1
+                    edge_current_vehicles[edge_str] -= (1 * sample_interval)
                 # print('1: ', trip_origin, trip_destin, edge_s, edge_e, trip_stop)
             else:
                 if edge_str != agent_current_links[path_i]:
-                    edge_current_vehicles[edge_str] += 1
+                    edge_current_vehicles[edge_str] += (1 * sample_interval)
                 new_current_link = edge_str
                 new_current_link_time = remaining_time
                 trip_stop = edge_s
@@ -244,7 +245,7 @@ def substep_assignment(nodes_df=None, weighted_edges_df=None, od_ss=None, quarte
     new_edges_df['t_avg'] = new_edges_df['fft'] * ( 1 + 0.3 * (new_edges_df['flow']/new_edges_df['capacity'])**4 )
     new_edges_df['t_avg'] = np.where(new_edges_df['t_avg']>36000, 36000, new_edges_df['t_avg'])
     new_edges_df['t_avg'] = new_edges_df['t_avg'].round(2)
-    bay_bridge_links = [76239, 285158, 313500, 425877]
+    # bay_bridge_links = [76239, 285158, 313500, 425877]
     # print(new_edges_df.loc[new_edges_df['uniqueid'].isin(bay_bridge_links), ['capacity', 'flow', 't_avg']])
     # sys.exit(0)
 
@@ -258,6 +259,9 @@ def write_edge_vol(edges_df=None, simulation_outputs=None, quarter=None, hour=No
         else:
             edges_df.loc[edges_df['vol_true']>0, ['start_nid', 'end_nid', 'veh_current', 'vol_true', 'vol_tot', 'flow', 't_avg']].to_csv(simulation_outputs+'/edge_vol/edge_vol_hr{}_qt{}_{}.csv'.format(hour, quarter, scen_nm), index=False)
 
+def write_final_vol(edges_df=None, simulation_outputs=None, quarter=None, hour=None, scen_nm=None):
+    
+    edges_df.loc[edges_df['vol_tot']>0, ['start_nid', 'end_nid', 'vol_tot']].to_csv(simulation_outputs+'/edge_vol/final_edge_vol_hr{}_qt{}_{}.csv'.format(hour, quarter, scen_nm), index=False)
 
 def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=None, scen_nm=None, var='flow'):
     
@@ -273,7 +277,7 @@ def plot_edge_flow(edges_df=None, simulation_outputs=None, quarter=None, hour=No
         ax.set_title('{} at {:02d}hr {:02d}div'.format(var, hour, quarter), font={'size': 30})
         plt.savefig(simulation_outputs+'/../visualization_outputs/map_hr{}_qt{}_{}.png'.format(hour, quarter, scen_nm), transparent=False)
 
-def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_df=None, nodes_df=None, od_all=None, demand_files=None, simulation_outputs=None, scen_nm=None, hour_list=None, quarter_list=None, cost_factor=None, closure_hours=[], closed_links=None, agent_time_limit=None):
+def assignment(quarter_counts=4, substep_counts=15, substep_size=4000000, edges_df=None, nodes_df=None, od_all=None, demand_files=None, simulation_outputs=None, scen_nm=None, hour_list=None, quarter_list=None, cost_factor=None, closure_hours=[], closed_links=None, agent_time_limit=None, sample_interval=1):
 
     ### OD processing
     # od_all = read_od(demand_files=demand_files, nodes_df=nodes_df)
@@ -295,6 +299,7 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_d
     ### Loop through days and hours
     for day in ['na']:
         for hour in hour_list:
+            gc.collect()
             if hour in closure_hours:
                 for row in closed_links.itertuples():
                     edges_df.loc[(edges_df['u']==getattr(row, 'u')) & (edges_df['v']==getattr(row, 'v')), 'capacity'] = 1
@@ -346,6 +351,7 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_d
                 edges_df['vol_true'] = 0
 
                 for ss_id in substep_ids:
+                    gc.collect()
 
                     time_ss_0 = time.time()
                     print(hour, quarter, ss_id)
@@ -365,7 +371,7 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_d
                     # weighted_edges_df['weight'] = weighted_edges_df['link_co2_g']
 
                     ### traffic assignment with truncated path
-                    edges_df, od_residual_ss_list, trip_info = substep_assignment(nodes_df=nodes_df, weighted_edges_df=weighted_edges_df, od_ss=od_ss, quarter_demand=quarter_demand, assigned_demand=assigned_demand, quarter_counts=quarter_counts, trip_info=trip_info, agent_time_limit=agent_time_limit)
+                    edges_df, od_residual_ss_list, trip_info = substep_assignment(nodes_df=nodes_df, weighted_edges_df=weighted_edges_df, od_ss=od_ss, quarter_demand=quarter_demand, assigned_demand=assigned_demand, quarter_counts=quarter_counts, trip_info=trip_info, agent_time_limit=agent_time_limit, sample_interval=sample_interval)
                     od_residual_list += od_residual_ss_list
                     logging.info('HR {} QT {} SS {} finished, max vol {}, max hwy vol {}, time {}'.format(hour, quarter, ss_id, np.max(edges_df['vol_true']), np.max(edges_df.loc[edges_df['is_highway']==1, 'vol_true']), time.time()-time_ss_0))
                     print(hour, quarter, ss_id)
@@ -381,3 +387,5 @@ def assignment(quarter_counts=4, substep_counts=15, substep_size=200000, edges_d
     # print(trip_info)
     trip_info_df = pd.DataFrame([[trip_key[0], trip_key[1], trip_key[2], trip_value[0], trip_value[1], trip_value[2]] for trip_key, trip_value in trip_info.items()], columns=['agent_id', 'origin_nid', 'destin_nid', 'travel_time', 'travel_time_used', 'stop_nid'])
     trip_info_df.to_csv(simulation_outputs+'/trip_info/trip_info_{}.csv'.format(scen_nm), index=False)
+
+    write_final_vol(edges_df=edges_df, simulation_outputs=simulation_outputs, quarter=quarter, hour=hour, scen_nm=scen_nm)
